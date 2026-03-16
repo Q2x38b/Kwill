@@ -21,41 +21,43 @@ interface GroupedThreads {
   threads: Thread[];
 }
 
-function groupThreadsByDate(threads: Thread[]): GroupedThreads[] {
+function formatDateLabel(date: Date): string {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-  const lastWeek = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const threadDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
 
-  const groups: { [key: string]: Thread[] } = {
-    Today: [],
-    Yesterday: [],
-    "This Week": [],
-    Earlier: [],
-  };
+  if (threadDay.getTime() >= today.getTime()) {
+    return "Today";
+  } else if (threadDay.getTime() >= yesterday.getTime()) {
+    return "Yesterday";
+  } else {
+    // Format as "February 27, 2026"
+    return date.toLocaleDateString("en-US", {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+  }
+}
+
+function groupThreadsByDate(threads: Thread[]): GroupedThreads[] {
+  const groups = new Map<string, Thread[]>();
 
   threads.forEach((thread) => {
     const threadDate = new Date(thread.lastMessageAt);
-    const threadDay = new Date(
-      threadDate.getFullYear(),
-      threadDate.getMonth(),
-      threadDate.getDate()
-    );
+    const label = formatDateLabel(threadDate);
 
-    if (threadDay.getTime() >= today.getTime()) {
-      groups.Today.push(thread);
-    } else if (threadDay.getTime() >= yesterday.getTime()) {
-      groups.Yesterday.push(thread);
-    } else if (threadDay.getTime() >= lastWeek.getTime()) {
-      groups["This Week"].push(thread);
-    } else {
-      groups.Earlier.push(thread);
+    if (!groups.has(label)) {
+      groups.set(label, []);
     }
+    groups.get(label)!.push(thread);
   });
 
-  return Object.entries(groups)
-    .filter(([, threads]) => threads.length > 0)
-    .map(([label, threads]) => ({ label, threads }));
+  return Array.from(groups.entries()).map(([label, threads]) => ({
+    label,
+    threads,
+  }));
 }
 
 export function EmailList({
@@ -102,8 +104,8 @@ export function EmailList({
 
   if (isLoading) {
     return (
-      <div className="flex-1 overflow-auto p-4 space-y-4">
-        {Array.from({ length: 6 }).map((_, i) => (
+      <div className="flex-1 overflow-auto px-4 py-2">
+        {Array.from({ length: 10 }).map((_, i) => (
           <EmailListItemSkeleton key={i} />
         ))}
       </div>
@@ -123,32 +125,31 @@ export function EmailList({
 
   return (
     <div className="flex-1 overflow-auto">
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-8">
+      <div className="max-w-3xl mx-auto px-2 py-2">
         <AnimatePresence initial={false}>
           {groupedThreads.map((group) => (
             <motion.div
               key={group.label}
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              className="space-y-3"
+              className="mb-4"
             >
               {/* Date label */}
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)] px-1">
+              <h2 className="text-xs font-medium text-[var(--muted-foreground)] px-3 py-2">
                 {group.label}
               </h2>
 
               {/* Threads in group */}
-              <div className="space-y-3">
+              <div>
                 {group.threads.map((thread, index) => (
                   <motion.div
                     key={thread._id}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, x: -20, scale: 0.95 }}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0, height: 0 }}
                     transition={{
-                      duration: 0.16,
-                      ease: [0.22, 1, 0.36, 1],
-                      delay: Math.min(index * 0.03, 0.15),
+                      duration: 0.15,
+                      delay: Math.min(index * 0.02, 0.1),
                     }}
                   >
                     <EmailListItem
@@ -167,13 +168,8 @@ export function EmailList({
           {isLoadingMore && (
             <div className="flex items-center gap-2 text-[var(--muted-foreground)]">
               <Loader2 className="h-4 w-4 animate-spin" />
-              <span className="text-sm">Loading more emails...</span>
+              <span className="text-sm">Loading more...</span>
             </div>
-          )}
-          {!hasMore && threads.length > 10 && (
-            <p className="text-sm text-[var(--muted-foreground)]">
-              You've reached the end
-            </p>
           )}
         </div>
       </div>
@@ -183,16 +179,11 @@ export function EmailList({
 
 function EmailListItemSkeleton() {
   return (
-    <div className="email-card p-4 space-y-2">
-      <div className="flex items-start justify-between gap-3">
-        <Skeleton className="h-5 w-3/4" />
-        <Skeleton className="h-4 w-12" />
-      </div>
-      <Skeleton className="h-4 w-40" />
-      <div className="space-y-1.5">
-        <Skeleton className="h-4 w-full" />
-        <Skeleton className="h-4 w-2/3" />
-      </div>
+    <div className="flex items-center gap-3 py-2.5 px-3">
+      <Skeleton className="w-2 h-2 rounded-full" />
+      <Skeleton className="h-4 w-[140px]" />
+      <Skeleton className="h-4 flex-1" />
+      <Skeleton className="h-4 w-16" />
     </div>
   );
 }

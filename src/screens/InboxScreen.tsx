@@ -163,10 +163,15 @@ export function InboxScreen() {
   // Show empty state if no threads
   const showEmptyState = !isLoading && allThreads.length === 0;
 
+  // Build inbox title with count
+  const inboxTitle = allThreads.length > 0
+    ? `Inbox (${allThreads.length}${hasMore ? "+" : ""})`
+    : "Inbox";
+
   return (
     <div className="flex flex-col h-full">
       <Header
-        title="Inbox"
+        title={inboxTitle}
         showSearch
         onSearchClick={() => navigate("/search")}
       />

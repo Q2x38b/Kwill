@@ -48,7 +48,19 @@ export function Header({
       )}
 
       {title && (
-        <h1 className="flex-1 text-lg font-semibold truncate">{title}</h1>
+        <h1 className="flex-1 text-lg font-semibold truncate">
+          {/* Handle "Title (count)" format by styling count differently */}
+          {title.includes("(") ? (
+            <>
+              {title.split("(")[0]}
+              <span className="text-[var(--muted-foreground)] font-normal">
+                ({title.split("(")[1]}
+              </span>
+            </>
+          ) : (
+            title
+          )}
+        </h1>
       )}
 
       {children && <div className="flex-1">{children}</div>}
