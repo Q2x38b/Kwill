@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { EmailList } from "@/components/email/EmailList";
 import { useDebounce } from "@/hooks/useDebounce";
+import { useThreadModal } from "@/hooks/useThreadModal";
 
 export function SearchScreen() {
   const navigate = useNavigate();
@@ -18,6 +19,8 @@ export function SearchScreen() {
     api.emails.queries.searchThreads,
     debouncedQuery.trim() ? { query: debouncedQuery } : "skip"
   );
+
+  const { openThread, ThreadModalComponent } = useThreadModal(threads ?? []);
 
   return (
     <div className="flex flex-col h-full">
@@ -82,12 +85,14 @@ export function SearchScreen() {
           >
             <EmailList
               threads={threads}
-              onThreadClick={(threadId) => navigate(`/thread/${threadId}`)}
+              onThreadClick={openThread}
               emptyMessage="No results found"
             />
           </motion.div>
         )}
       </AnimatePresence>
+
+      <ThreadModalComponent />
     </div>
   );
 }

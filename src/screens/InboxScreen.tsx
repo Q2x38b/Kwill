@@ -8,6 +8,7 @@ import { Header } from "@/components/layout/Header";
 import { EmailList } from "@/components/email/EmailList";
 import { EmailFilters } from "@/components/email/EmailFilters";
 import { Button } from "@/components/ui/button";
+import { useThreadModal } from "@/hooks/useThreadModal";
 import type { EmailCategory, EmailFilter, Thread } from "@/types/email";
 
 export function InboxScreen() {
@@ -68,6 +69,9 @@ export function InboxScreen() {
   }, [firstPageThreads, paginatedThreads]);
 
   const isLoading = firstPageResult === undefined && allThreads.length === 0;
+
+  // Thread modal
+  const { openThread, ThreadModalComponent } = useThreadModal(allThreads);
 
   // When paginated query returns, accumulate those threads
   useEffect(() => {
@@ -270,7 +274,7 @@ export function InboxScreen() {
       ) : (
         <EmailList
           threads={allThreads}
-          onThreadClick={(threadId) => navigate(`/thread/${threadId}`)}
+          onThreadClick={openThread}
           emptyMessage="Your inbox is empty"
           isLoading={isLoading}
           hasMore={hasMore}
@@ -278,6 +282,9 @@ export function InboxScreen() {
           onLoadMore={handleLoadMore}
         />
       )}
+
+      {/* Thread Modal */}
+      <ThreadModalComponent />
     </div>
   );
 }
