@@ -275,6 +275,7 @@ export const fullSync = action({
       await ctx.runMutation(internal.sync.mutations.setGmailConnected, {
         userId: user._id,
         connected: true,
+        gmailEmail: userEmail, // Store Gmail email to ensure webhook can find user
       });
 
       return {
@@ -688,6 +689,7 @@ export const fullSyncInternal = internalAction({
       await ctx.runMutation(internal.sync.mutations.setGmailConnected, {
         userId: user._id,
         connected: true,
+        gmailEmail: userEmail, // Store Gmail email to ensure webhook can find user
       });
 
       // Set up Gmail push notifications for real-time updates
@@ -695,6 +697,7 @@ export const fullSyncInternal = internalAction({
         await ctx.runAction(internal.sync.gmail.setupGmailWatch, {
           clerkUserId: args.clerkUserId,
         });
+        console.log(`Gmail watch set up successfully for ${userEmail}`);
       } catch (watchError) {
         // Non-fatal - push notifications are optional
         console.log("Failed to set up Gmail watch (non-fatal):", watchError);
@@ -1146,23 +1149,27 @@ export const syncByEmail = internalAction({
     email: v.string(),
     triggeredByPush: v.optional(v.boolean()),
   },
-  handler: async (ctx, args): Promise<{ success?: boolean; error?: string }> => {
+  handler: async (ctx, args): Promise<{ success?: boolean; error?: string; changes?: number }> => {
+    console.log(`syncByEmail called for: ${args.email}`);
+
     // Find user by email
     const user = await ctx.runQuery(internal.sync.queries.getUserByEmail, {
       email: args.email,
     });
 
     if (!user) {
-      console.log(`No user found for email: ${args.email}`);
+      console.log(`No user found for email: ${args.email} - check if user exists in database with matching email`);
       return { success: false, error: "User not found" };
     }
+
+    console.log(`Found user: ${user._id}, email: ${user.email}, gmailConnected: ${user.gmailConnected}`);
 
     if (!user.gmailConnected) {
       console.log(`Gmail not connected for user: ${args.email}`);
       return { success: false, error: "Gmail not connected" };
     }
 
-    console.log(`Push notification sync for ${args.email}`);
+    console.log(`Starting incremental sync for ${args.email}`);
 
     // Run incremental sync
     try {
@@ -1170,14 +1177,19 @@ export const syncByEmail = internalAction({
         clerkUserId: user.clerkId,
       });
 
+      console.log(`Incremental sync result for ${args.email}: ${JSON.stringify(result)}`);
+
       // If incremental sync says full sync needed, do it
       if (result.needsFullSync) {
-        await ctx.runAction(internal.sync.gmail.fullSyncInternal, {
+        console.log(`Full sync needed for ${args.email}, triggering...`);
+        const fullResult = await ctx.runAction(internal.sync.gmail.fullSyncInternal, {
           clerkUserId: user.clerkId,
         });
+        console.log(`Full sync result for ${args.email}: synced ${fullResult.threadsSynced} threads`);
+        return { success: true, changes: fullResult.threadsSynced };
       }
 
-      return { success: true };
+      return { success: true, changes: result.changes ?? 0 };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Unknown error";
       console.error(`Push sync failed for ${args.email}:`, errorMsg);
@@ -1218,30 +1230,37 @@ export const setupWatch = action({
 export const getWatchStatus = action({
   args: {},
   handler: async (ctx): Promise<{ hasWatch: boolean; expiration?: number; topicConfigured: boolean }> => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Not authenticated");
+    try {
+      const identity = await ctx.auth.getUserIdentity();
+      if (!identity) {
+        // Return safe default instead of throwing for unauthenticated users
+        return { hasWatch: false, topicConfigured: false };
+      }
+
+      const topicName = process.env.GMAIL_PUBSUB_TOPIC;
+
+      const user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
+        clerkId: identity.subject,
+      });
+
+      if (!user) {
+        return { hasWatch: false, topicConfigured: !!topicName };
+      }
+
+      const syncState = await ctx.runQuery(internal.sync.queries.getSyncState, {
+        userId: user._id,
+      });
+
+      return {
+        hasWatch: !!(syncState?.watchExpiration && syncState.watchExpiration > Date.now()),
+        expiration: syncState?.watchExpiration,
+        topicConfigured: !!topicName,
+      };
+    } catch (error) {
+      console.error("getWatchStatus error:", error);
+      // Return safe default on error
+      return { hasWatch: false, topicConfigured: false };
     }
-
-    const topicName = process.env.GMAIL_PUBSUB_TOPIC;
-
-    const user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
-      clerkId: identity.subject,
-    });
-
-    if (!user) {
-      return { hasWatch: false, topicConfigured: !!topicName };
-    }
-
-    const syncState = await ctx.runQuery(internal.sync.queries.getSyncState, {
-      userId: user._id,
-    });
-
-    return {
-      hasWatch: !!(syncState?.watchExpiration && syncState.watchExpiration > Date.now()),
-      expiration: syncState?.watchExpiration,
-      topicConfigured: !!topicName,
-    };
   },
 });
 

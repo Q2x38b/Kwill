@@ -192,12 +192,20 @@ export const setGmailConnected = internalMutation({
   args: {
     userId: v.id("users"),
     connected: v.boolean(),
+    gmailEmail: v.optional(v.string()), // Update user email to match Gmail
   },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.userId, {
+    const updates: Record<string, unknown> = {
       gmailConnected: args.connected,
       lastSyncAt: args.connected ? Date.now() : undefined,
-    });
+    };
+
+    // Update user email to match Gmail email for accurate webhook lookup
+    if (args.gmailEmail) {
+      updates.email = args.gmailEmail;
+    }
+
+    await ctx.db.patch(args.userId, updates);
   },
 });
 

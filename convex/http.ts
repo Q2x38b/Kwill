@@ -14,25 +14,23 @@ http.route({
   path: "/gmail/webhook",
   method: "POST",
   handler: httpAction(async (ctx, request) => {
-    console.log("Gmail webhook received");
+    const startTime = Date.now();
+    console.log("=== Gmail Webhook Received ===");
 
     try {
       const body = await request.json();
-      console.log("Webhook payload:", JSON.stringify(body, null, 2));
 
       // Gmail Pub/Sub sends data in this format:
       // { message: { data: base64EncodedString, messageId: string }, subscription: string }
       const message = body.message;
 
       if (!message?.data) {
-        console.log("No message data in webhook payload");
+        console.log("No message data in webhook payload - might be a subscription confirmation");
         return new Response("OK", { status: 200 });
       }
 
       // Decode the base64 message
       const decodedData = atob(message.data);
-      console.log("Decoded notification data:", decodedData);
-
       const notification = JSON.parse(decodedData);
 
       // notification contains: { emailAddress: string, historyId: string }
@@ -43,7 +41,7 @@ http.route({
         return new Response("OK", { status: 200 });
       }
 
-      console.log(`Gmail push notification for ${emailAddress}, historyId: ${historyId}`);
+      console.log(`Push notification: email=${emailAddress}, historyId=${historyId}, messageId=${message.messageId}`);
 
       // Trigger incremental sync for this user
       const result = await ctx.runAction(internal.sync.gmail.syncByEmail, {
@@ -51,11 +49,13 @@ http.route({
         triggeredByPush: true,
       });
 
-      console.log("Sync result:", JSON.stringify(result));
+      const duration = Date.now() - startTime;
+      console.log(`Webhook completed in ${duration}ms: ${JSON.stringify(result)}`);
 
       return new Response("OK", { status: 200 });
     } catch (error) {
-      console.error("Error processing Gmail webhook:", error);
+      const duration = Date.now() - startTime;
+      console.error(`Webhook error after ${duration}ms:`, error);
       // Still return 200 to prevent Gmail from retrying
       return new Response("OK", { status: 200 });
     }

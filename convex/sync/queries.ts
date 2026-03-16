@@ -86,16 +86,31 @@ export const getThreadByGmailId = internalQuery({
 
 /**
  * Get user by email address (for Gmail push notifications)
+ * Tries exact match first, then case-insensitive search
  */
 export const getUserByEmail = internalQuery({
   args: {
     email: v.string(),
   },
   handler: async (ctx, args) => {
-    return await ctx.db
+    // Try exact match first (most common case)
+    const exactMatch = await ctx.db
       .query("users")
       .withIndex("by_email", (q) => q.eq("email", args.email))
       .first();
+
+    if (exactMatch) {
+      return exactMatch;
+    }
+
+    // Try case-insensitive match (Gmail might send different casing)
+    const lowerEmail = args.email.toLowerCase();
+    const users = await ctx.db.query("users").collect();
+    const caseInsensitiveMatch = users.find(
+      (u) => u.email.toLowerCase() === lowerEmail
+    );
+
+    return caseInsensitiveMatch || null;
   },
 });
 
