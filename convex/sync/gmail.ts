@@ -1192,6 +1192,65 @@ export const syncByEmail = internalAction({
 });
 
 /**
+ * Public action to manually set up Gmail watch (for debugging/UI)
+ */
+export const setupWatch = action({
+  args: {},
+  handler: async (ctx): Promise<{ success: boolean; error?: string; expiration?: number }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not authenticated");
+    }
+
+    const topicName = process.env.GMAIL_PUBSUB_TOPIC;
+    if (!topicName) {
+      return { success: false, error: "GMAIL_PUBSUB_TOPIC not configured in Convex environment. Add it in Convex Dashboard > Settings > Environment Variables" };
+    }
+
+    console.log(`Setting up Gmail watch for user ${identity.subject}`);
+
+    const result = await ctx.runAction(internal.sync.gmail.setupGmailWatch, {
+      clerkUserId: identity.subject,
+    });
+
+    return result;
+  },
+});
+
+/**
+ * Check watch status for current user
+ */
+export const getWatchStatus = action({
+  args: {},
+  handler: async (ctx): Promise<{ hasWatch: boolean; expiration?: number; topicConfigured: boolean }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not authenticated");
+    }
+
+    const topicName = process.env.GMAIL_PUBSUB_TOPIC;
+
+    const user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
+      clerkId: identity.subject,
+    });
+
+    if (!user) {
+      return { hasWatch: false, topicConfigured: !!topicName };
+    }
+
+    const syncState = await ctx.runQuery(internal.sync.queries.getSyncState, {
+      userId: user._id,
+    });
+
+    return {
+      hasWatch: !!(syncState?.watchExpiration && syncState.watchExpiration > Date.now()),
+      expiration: syncState?.watchExpiration,
+      topicConfigured: !!topicName,
+    };
+  },
+});
+
+/**
  * Renew Gmail watch for all users with expiring watches
  */
 export const renewExpiringWatches = internalAction({

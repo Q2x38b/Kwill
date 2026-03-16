@@ -14,8 +14,11 @@ http.route({
   path: "/gmail/webhook",
   method: "POST",
   handler: httpAction(async (ctx, request) => {
+    console.log("Gmail webhook received");
+
     try {
       const body = await request.json();
+      console.log("Webhook payload:", JSON.stringify(body, null, 2));
 
       // Gmail Pub/Sub sends data in this format:
       // { message: { data: base64EncodedString, messageId: string }, subscription: string }
@@ -28,6 +31,8 @@ http.route({
 
       // Decode the base64 message
       const decodedData = atob(message.data);
+      console.log("Decoded notification data:", decodedData);
+
       const notification = JSON.parse(decodedData);
 
       // notification contains: { emailAddress: string, historyId: string }
@@ -41,10 +46,12 @@ http.route({
       console.log(`Gmail push notification for ${emailAddress}, historyId: ${historyId}`);
 
       // Trigger incremental sync for this user
-      await ctx.runAction(internal.sync.gmail.syncByEmail, {
+      const result = await ctx.runAction(internal.sync.gmail.syncByEmail, {
         email: emailAddress,
         triggeredByPush: true,
       });
+
+      console.log("Sync result:", JSON.stringify(result));
 
       return new Response("OK", { status: 200 });
     } catch (error) {

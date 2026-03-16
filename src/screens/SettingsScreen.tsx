@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { useUser, useClerk, UserButton } from "@clerk/react";
-import { useQuery, useMutation } from "convex/react";
-import { Moon, Sun, Monitor, LogOut, Trash2, Loader2 } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useUser, useClerk, UserButton } from "@clerk/clerk-react";
+import { useQuery, useMutation, useAction } from "convex/react";
+import { Moon, Sun, Monitor, LogOut, Trash2, Loader2, Bell, BellOff, RefreshCw } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,46 @@ export function SettingsScreen() {
   const currentUser = useQuery(api.users.current);
   const updateSettings = useMutation(api.users.updateSettings);
   const clearData = useMutation(api.dev.seed.clearSampleData);
+  const setupWatch = useAction(api.sync.gmail.setupWatch);
+  const getWatchStatus = useAction(api.sync.gmail.getWatchStatus);
   const [isClearing, setIsClearing] = useState(false);
+  const [isSettingUpWatch, setIsSettingUpWatch] = useState(false);
+  const [watchStatus, setWatchStatus] = useState<{
+    hasWatch: boolean;
+    expiration?: number;
+    topicConfigured: boolean;
+  } | null>(null);
+  const [watchError, setWatchError] = useState<string | null>(null);
+
+  // Fetch watch status on mount and when user changes
+  useEffect(() => {
+    if (currentUser?.gmailConnected) {
+      getWatchStatus({})
+        .then(setWatchStatus)
+        .catch((err) => console.error("Failed to get watch status:", err));
+    }
+  }, [currentUser?.gmailConnected, getWatchStatus]);
+
+  const handleSetupWatch = async () => {
+    setIsSettingUpWatch(true);
+    setWatchError(null);
+    try {
+      const result = await setupWatch({});
+      if (result.success) {
+        setWatchStatus({
+          hasWatch: true,
+          expiration: result.expiration,
+          topicConfigured: true,
+        });
+      } else {
+        setWatchError(result.error || "Failed to set up push notifications");
+      }
+    } catch (error) {
+      setWatchError(error instanceof Error ? error.message : "Failed to set up push notifications");
+    } finally {
+      setIsSettingUpWatch(false);
+    }
+  };
 
   const handleClearData = async () => {
     if (!confirm("This will delete all your email data. Are you sure?")) return;
@@ -79,6 +118,61 @@ export function SettingsScreen() {
           </h2>
           <GmailConnection />
         </section>
+
+        {/* Real-time notifications */}
+        {currentUser?.gmailConnected && (
+          <section className="p-4 pt-0">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)] mb-3 px-1">
+              Real-time Updates
+            </h2>
+            <div className="bg-[var(--card)] rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {watchStatus?.hasWatch ? (
+                    <Bell className="h-5 w-5 text-[var(--success)]" />
+                  ) : (
+                    <BellOff className="h-5 w-5 text-[var(--muted-foreground)]" />
+                  )}
+                  <div>
+                    <p className="text-sm font-medium">
+                      {watchStatus?.hasWatch ? "Push notifications active" : "Push notifications inactive"}
+                    </p>
+                    {watchStatus?.hasWatch && watchStatus.expiration && (
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        Expires: {new Date(watchStatus.expiration).toLocaleDateString()}
+                      </p>
+                    )}
+                    {!watchStatus?.topicConfigured && (
+                      <p className="text-xs text-[var(--destructive)]">
+                        Server not configured for push notifications
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSetupWatch}
+                  disabled={isSettingUpWatch || !watchStatus?.topicConfigured}
+                  className="gap-2"
+                >
+                  {isSettingUpWatch ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                  {watchStatus?.hasWatch ? "Renew" : "Enable"}
+                </Button>
+              </div>
+              {watchError && (
+                <p className="text-xs text-[var(--destructive)]">{watchError}</p>
+              )}
+              <p className="text-xs text-[var(--muted-foreground)]">
+                Push notifications deliver new emails instantly without polling.
+              </p>
+            </div>
+          </section>
+        )}
 
         {/* Appearance */}
         <section className="p-4 pt-0">
