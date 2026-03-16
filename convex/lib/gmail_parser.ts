@@ -3,8 +3,8 @@ import type {
   GmailMessagePart,
   GmailHeader,
   ParsedEmail,
-} from "./gmail-types";
-import { mapGmailCategoryToApp } from "./gmail-types";
+} from "./gmail_types";
+import { mapGmailCategoryToApp } from "./gmail_types";
 
 /**
  * Parse an email address string like "John Doe <john@example.com>"
