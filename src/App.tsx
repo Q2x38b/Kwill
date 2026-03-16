@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useAuth, RedirectToSignIn } from "@clerk/react";
+import { UserProvider } from "@/components/providers/UserProvider";
 import { AppShell } from "@/components/layout/AppShell";
 import { InboxScreen } from "@/screens/InboxScreen";
 import { ThreadScreen } from "@/screens/ThreadScreen";
@@ -37,7 +38,9 @@ export default function App() {
           path="/"
           element={
             <ProtectedRoute>
-              <AppShell />
+              <UserProvider>
+                <AppShell />
+              </UserProvider>
             </ProtectedRoute>
           }
         >
