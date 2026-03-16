@@ -38,10 +38,10 @@ export function EmailThread({ threadId, thread }: EmailThreadProps) {
 
   // Mark thread as read when viewed
   useEffect(() => {
-    if (thread.isUnread) {
-      markAsRead(threadId);
+    if (!thread.isRead) {
+      markAsRead(threadId, true);
     }
-  }, [threadId, thread.isUnread, markAsRead]);
+  }, [threadId, thread.isRead, markAsRead]);
 
   const handleArchive = async () => {
     await archive(threadId);
