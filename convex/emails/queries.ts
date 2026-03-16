@@ -356,32 +356,77 @@ export const searchContacts = query({
     }
 
     const searchQuery = args.query.toLowerCase().trim();
-    if (!searchQuery) {
-      // Return top contacts by email count if no search query
-      const topContacts = await ctx.db
-        .query("contacts")
-        .withIndex("by_user_email_count", (q) => q.eq("userId", user._id))
-        .order("desc")
-        .take(args.limit ?? 10);
-      return topContacts;
-    }
+    const limit = args.limit ?? 10;
 
-    // Get all user contacts and filter by search query
-    const contacts = await ctx.db
+    // Get contacts from the contacts table
+    let contacts = await ctx.db
       .query("contacts")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect();
 
-    // Filter by email or name match
-    const matches = contacts
-      .filter((c) => {
+    // Filter by search query if provided
+    if (searchQuery) {
+      contacts = contacts.filter((c) => {
         const emailMatch = c.email.toLowerCase().includes(searchQuery);
         const nameMatch = c.name?.toLowerCase().includes(searchQuery);
         return emailMatch || nameMatch;
-      })
-      .sort((a, b) => b.emailCount - a.emailCount) // Sort by email frequency
-      .slice(0, args.limit ?? 10);
+      });
+    }
 
-    return matches;
+    // Sort by email frequency
+    contacts.sort((a, b) => b.emailCount - a.emailCount);
+
+    // If we have enough contacts, return them
+    if (contacts.length >= limit) {
+      return contacts.slice(0, limit);
+    }
+
+    // Fallback: also search thread participants for suggestions
+    const threads = await ctx.db
+      .query("threads")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .take(100); // Check recent threads
+
+    // Extract unique participants from threads
+    const participantMap = new Map<string, { email: string; name?: string }>();
+    const existingEmails = new Set(contacts.map((c) => c.email.toLowerCase()));
+
+    for (const thread of threads) {
+      for (const participant of thread.participants || []) {
+        const email = participant.email.toLowerCase();
+        // Skip user's own email and already found contacts
+        if (email === user.email.toLowerCase()) continue;
+        if (existingEmails.has(email)) continue;
+
+        // Check if matches search query
+        if (searchQuery) {
+          const emailMatch = email.includes(searchQuery);
+          const nameMatch = participant.name?.toLowerCase().includes(searchQuery);
+          if (!emailMatch && !nameMatch) continue;
+        }
+
+        if (!participantMap.has(email)) {
+          participantMap.set(email, {
+            email: participant.email,
+            name: participant.name,
+          });
+        }
+      }
+    }
+
+    // Convert participants to contact-like objects
+    const participantContacts = Array.from(participantMap.values()).map((p) => ({
+      _id: `participant_${p.email}` as string,
+      email: p.email,
+      name: p.name,
+      emailCount: 0,
+      isFavorite: false,
+      userId: user._id,
+    }));
+
+    // Combine and limit results
+    const combined = [...contacts, ...participantContacts];
+    return combined.slice(0, limit);
   },
 });
