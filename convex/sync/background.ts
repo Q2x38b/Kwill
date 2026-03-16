@@ -2,6 +2,15 @@
 
 import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
+import type { Doc } from "../_generated/dataModel";
+
+type SyncInternalResult = {
+  success?: boolean;
+  needsFullSync?: boolean;
+  skipped?: boolean;
+  changes?: number;
+  message?: string
+};
 
 /**
  * Background sync for all connected users
@@ -11,7 +20,7 @@ export const syncAllUsers = internalAction({
   args: {},
   handler: async (ctx): Promise<{ synced: number; total?: number; errors?: string[] }> => {
     // Get all users with Gmail connected
-    const users = await ctx.runQuery(internal.sync.queries.getConnectedUsers, {});
+    const users: Doc<"users">[] = await ctx.runQuery(internal.sync.queries.getConnectedUsers, {});
 
     if (!users || users.length === 0) {
       console.log("No connected users to sync");
@@ -24,7 +33,7 @@ export const syncAllUsers = internalAction({
     for (const user of users) {
       try {
         // Try incremental sync first
-        const result = await ctx.runAction(
+        const result: SyncInternalResult = await ctx.runAction(
           internal.sync.gmail.incrementalSyncInternal,
           { clerkUserId: user.clerkId }
         );

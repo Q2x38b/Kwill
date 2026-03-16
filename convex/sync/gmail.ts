@@ -551,7 +551,7 @@ export const smartSync = action({
     }
 
     // Try incremental sync
-    const result = await ctx.runAction(internal.sync.gmail.incrementalSyncInternal, {
+    const result: SyncResult = await ctx.runAction(internal.sync.gmail.incrementalSyncInternal, {
       clerkUserId: identity.subject,
     });
 

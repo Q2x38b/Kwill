@@ -5,6 +5,7 @@ declare const process: { env: Record<string, string | undefined> };
 import { v } from "convex/values";
 import { action } from "../_generated/server";
 import { internal } from "../_generated/api";
+import type { Doc } from "../_generated/dataModel";
 
 const GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 
@@ -267,7 +268,7 @@ export const toggleStar = action({
       throw new Error("Not authenticated");
     }
 
-    const thread = await ctx.runQuery(internal.emails.internalQueries.getThreadById, {
+    const thread: Doc<"threads"> | null = await ctx.runQuery(internal.emails.internalQueries.getThreadById, {
       threadId: args.threadId,
     });
 
@@ -275,7 +276,7 @@ export const toggleStar = action({
       throw new Error("Thread not found");
     }
 
-    const newStarred = !thread.isStarred;
+    const newStarred: boolean = !thread.isStarred;
 
     try {
       const accessToken = await getGoogleOAuthToken(identity.subject);

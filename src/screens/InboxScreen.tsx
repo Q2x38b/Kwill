@@ -46,9 +46,9 @@ export function InboxScreen() {
         setAllThreads(threads);
       } else {
         // Additional page - append new threads
-        setAllThreads((prev) => {
-          const existingIds = new Set(prev.map((t) => t._id));
-          const newThreads = threads.filter((t) => !existingIds.has(t._id));
+        setAllThreads((prev: Thread[]) => {
+          const existingIds = new Set(prev.map((t: Thread) => t._id));
+          const newThreads = threads.filter((t: Thread) => !existingIds.has(t._id));
           return [...prev, ...newThreads];
         });
       }
