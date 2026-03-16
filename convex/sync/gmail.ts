@@ -129,7 +129,7 @@ async function getGmailThread(
  */
 export const fullSync = action({
   args: {},
-  handler: async (ctx) => {
+  handler: async (ctx): Promise<{ success: boolean; threadsSynced: number; message?: string }> => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
       throw new Error("Not authenticated");
@@ -332,7 +332,7 @@ async function getGmailHistory(
  */
 export const incrementalSync = action({
   args: {},
-  handler: async (ctx) => {
+  handler: async (ctx): Promise<{ success?: boolean; needsFullSync?: boolean; skipped?: boolean; changes?: number; message?: string }> => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
       throw new Error("Not authenticated");
@@ -520,9 +520,11 @@ export const incrementalSync = action({
 /**
  * Smart sync - tries incremental first, falls back to full
  */
+type SyncResult = { success?: boolean; needsFullSync?: boolean; skipped?: boolean; changes?: number; threadsSynced?: number; message?: string };
+
 export const smartSync = action({
   args: {},
-  handler: async (ctx) => {
+  handler: async (ctx): Promise<SyncResult> => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
       throw new Error("Not authenticated");
@@ -570,7 +572,7 @@ import { v } from "convex/values";
 
 export const fullSyncInternal = internalAction({
   args: { clerkUserId: v.string() },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<{ success: boolean; threadsSynced: number }> => {
     const user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
       clerkId: args.clerkUserId,
     });
@@ -706,7 +708,7 @@ export const fullSyncInternal = internalAction({
 
 export const incrementalSyncInternal = internalAction({
   args: { clerkUserId: v.string() },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<{ success?: boolean; needsFullSync?: boolean; skipped?: boolean; changes?: number; message?: string }> => {
     const user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
       clerkId: args.clerkUserId,
     });
@@ -873,7 +875,7 @@ export const incrementalSyncInternal = internalAction({
  */
 export const loadMoreEmails = action({
   args: {},
-  handler: async (ctx) => {
+  handler: async (ctx): Promise<{ success?: boolean; skipped?: boolean; threadsSynced?: number; message?: string }> => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
       throw new Error("Not authenticated");

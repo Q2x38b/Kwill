@@ -8,7 +8,7 @@ import { Header } from "@/components/layout/Header";
 import { EmailList } from "@/components/email/EmailList";
 import { EmailFilters } from "@/components/email/EmailFilters";
 import { Button } from "@/components/ui/button";
-import type { EmailCategory, EmailFilter } from "@/types/email";
+import type { EmailCategory, EmailFilter, Thread } from "@/types/email";
 
 export function InboxScreen() {
   const navigate = useNavigate();
@@ -17,7 +17,7 @@ export function InboxScreen() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [cursor, setCursor] = useState<number | undefined>(undefined);
-  const [allThreads, setAllThreads] = useState<typeof threads>([]);
+  const [allThreads, setAllThreads] = useState<Thread[]>([]);
   const lastSyncRef = useRef<number>(0);
 
   const result = useQuery(api.emails.queries.listThreads, {

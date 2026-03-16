@@ -9,7 +9,7 @@ import { internal } from "../_generated/api";
  */
 export const syncAllUsers = internalAction({
   args: {},
-  handler: async (ctx) => {
+  handler: async (ctx): Promise<{ synced: number; total?: number; errors?: string[] }> => {
     // Get all users with Gmail connected
     const users = await ctx.runQuery(internal.sync.queries.getConnectedUsers, {});
 
