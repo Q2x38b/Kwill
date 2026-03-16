@@ -1,5 +1,8 @@
 "use node";
 
+// Declare process for Node.js environment
+declare const process: { env: Record<string, string | undefined> };
+
 import { action } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { GmailThread, GmailListResponse } from "../lib/gmail_types";
