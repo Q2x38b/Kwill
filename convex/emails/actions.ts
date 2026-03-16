@@ -497,18 +497,19 @@ export const sendEmail = action({
     replyToThreadId: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<{ success: boolean; messageId?: string; threadId?: string; error?: string }> => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Not authenticated");
-    }
-
     try {
+      const identity = await ctx.auth.getUserIdentity();
+      if (!identity) {
+        return { success: false, error: "Not authenticated" };
+      }
+
       const accessToken = await getGoogleOAuthToken(identity.subject);
 
       // Get user's email for the From header
       const profileResponse = await gmailFetch("/profile", accessToken);
       if (!profileResponse.ok) {
-        throw new Error("Failed to get Gmail profile");
+        const error = await profileResponse.text();
+        return { success: false, error: `Failed to get Gmail profile: ${error}` };
       }
       const profile = await profileResponse.json();
       const userEmail = profile.emailAddress;
@@ -524,8 +525,9 @@ export const sendEmail = action({
         replyToMessageId: args.replyToMessageId,
       });
 
-      // Encode to base64url
-      const encodedMessage = btoa(mimeMessage)
+      // Encode to base64url using Buffer (Node.js compatible)
+      const encodedMessage = Buffer.from(mimeMessage, "utf-8")
+        .toString("base64")
         .replace(/\+/g, "-")
         .replace(/\//g, "_")
         .replace(/=+$/, "");
@@ -545,7 +547,7 @@ export const sendEmail = action({
       if (!response.ok) {
         const error = await response.text();
         console.error("Gmail send error:", error);
-        throw new Error(`Failed to send email: ${response.status} - ${error}`);
+        return { success: false, error: `Failed to send email: ${response.status} - ${error}` };
       }
 
       const result = await response.json();
@@ -598,8 +600,8 @@ function buildMimeMessage(args: {
     lines.push(`Bcc: ${args.bcc.join(", ")}`);
   }
 
-  // Encode subject for UTF-8 support
-  const encodedSubject = `=?UTF-8?B?${btoa(unescape(encodeURIComponent(args.subject)))}?=`;
+  // Encode subject for UTF-8 support using Buffer (Node.js compatible)
+  const encodedSubject = `=?UTF-8?B?${Buffer.from(args.subject, "utf-8").toString("base64")}?=`;
   lines.push(`Subject: ${encodedSubject}`);
 
   // Reply headers
@@ -640,15 +642,10 @@ function parseMessageBody(gmailMessage: {
   const payload = gmailMessage.payload;
   if (!payload) return { bodyPlain, bodyHtml };
 
-  // Helper to decode base64url
+  // Helper to decode base64url using Buffer (Node.js compatible)
   const decodeBase64 = (data: string): string => {
     const base64 = data.replace(/-/g, "+").replace(/_/g, "/");
-    return decodeURIComponent(
-      atob(base64)
-        .split("")
-        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-        .join("")
-    );
+    return Buffer.from(base64, "base64").toString("utf-8");
   };
 
   // Helper to extract body from parts
