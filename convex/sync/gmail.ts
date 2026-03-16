@@ -297,5 +297,733 @@ export const fullSync = action({
   },
 });
 
+/**
+ * Get Gmail history (changes since last sync)
+ */
+interface HistoryResponse {
+  history?: Array<{
+    id: string;
+    messagesAdded?: Array<{ message: { id: string; threadId: string } }>;
+    messagesDeleted?: Array<{ message: { id: string; threadId: string } }>;
+    labelsAdded?: Array<{ message: { id: string; threadId: string }; labelIds: string[] }>;
+    labelsRemoved?: Array<{ message: { id: string; threadId: string }; labelIds: string[] }>;
+  }>;
+  historyId: string;
+  nextPageToken?: string;
+}
+
+async function getGmailHistory(
+  accessToken: string,
+  startHistoryId: string
+): Promise<HistoryResponse> {
+  const params = new URLSearchParams({
+    startHistoryId,
+    labelId: "INBOX",
+  });
+
+  return gmailFetch<HistoryResponse>(
+    `/history?${params}`,
+    accessToken
+  );
+}
+
+/**
+ * Incremental sync - only fetch changes since last sync
+ */
+export const incrementalSync = action({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not authenticated");
+    }
+
+    const user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
+      clerkId: identity.subject,
+    });
+
+    if (!user) {
+      throw new Error("User not found in database");
+    }
+
+    // Get current sync state
+    const syncState = await ctx.runQuery(internal.sync.queries.getSyncState, {
+      userId: user._id,
+    });
+
+    // If no history ID, do a full sync instead
+    if (!syncState?.historyId) {
+      return { needsFullSync: true, message: "No history ID found, full sync required" };
+    }
+
+    // Check if sync is already in progress
+    if (syncState.syncInProgress) {
+      return { skipped: true, message: "Sync already in progress" };
+    }
+
+    // Update sync state to in progress
+    await ctx.runMutation(internal.sync.mutations.updateSyncState, {
+      userId: user._id,
+      syncInProgress: true,
+      isFullSync: false,
+    });
+
+    try {
+      const accessToken = await getGoogleOAuthToken(identity.subject);
+      const profile = await getGmailProfile(accessToken);
+      const userEmail = profile.email;
+
+      // Get history since last sync
+      const history = await getGmailHistory(accessToken, syncState.historyId);
+
+      if (!history.history || history.history.length === 0) {
+        // No changes
+        await ctx.runMutation(internal.sync.mutations.updateSyncState, {
+          userId: user._id,
+          syncInProgress: false,
+          isFullSync: false,
+          historyId: history.historyId,
+        });
+
+        return { success: true, changes: 0, message: "No new changes" };
+      }
+
+      // Collect unique thread IDs that changed
+      const changedThreadIds = new Set<string>();
+      for (const entry of history.history) {
+        for (const added of entry.messagesAdded || []) {
+          changedThreadIds.add(added.message.threadId);
+        }
+        for (const labelChange of entry.labelsAdded || []) {
+          changedThreadIds.add(labelChange.message.threadId);
+        }
+        for (const labelChange of entry.labelsRemoved || []) {
+          changedThreadIds.add(labelChange.message.threadId);
+        }
+      }
+
+      let syncedCount = 0;
+
+      // Re-sync each changed thread
+      for (const gmailThreadId of changedThreadIds) {
+        try {
+          const fullThread = await getGmailThread(accessToken, gmailThreadId);
+
+          if (!fullThread.messages || fullThread.messages.length === 0) {
+            continue;
+          }
+
+          const firstMessage = fullThread.messages[0];
+          const lastMessage = fullThread.messages[fullThread.messages.length - 1];
+          const parsedFirst = parseGmailMessage(firstMessage, userEmail);
+          const parsedLast = parseGmailMessage(lastMessage, userEmail);
+
+          const participantsMap = new Map<string, { email: string; name?: string }>();
+          for (const msg of fullThread.messages) {
+            const parsed = parseGmailMessage(msg, userEmail);
+            participantsMap.set(parsed.from.email, parsed.from);
+            for (const recipient of parsed.to) {
+              participantsMap.set(recipient.email, recipient);
+            }
+          }
+          const participants = Array.from(participantsMap.values()).slice(0, 10);
+
+          const labels = lastMessage.labelIds || [];
+          const threadHasAttachments = fullThread.messages.some(
+            (m) => parseGmailMessage(m, userEmail).attachments.length > 0
+          );
+
+          // Store/update thread
+          const threadId = await ctx.runMutation(internal.sync.mutations.storeThread, {
+            userId: user._id,
+            gmailThreadId: fullThread.id,
+            subject: parsedFirst.subject,
+            snippet: parsedLast.snippet,
+            participants,
+            messageCount: fullThread.messages.length,
+            lastMessageAt: parsedLast.receivedAt,
+            isRead: isEmailRead(labels),
+            isStarred: isEmailStarred(labels),
+            isArchived: isEmailArchived(labels),
+            isTrashed: isEmailTrashed(labels),
+            hasAttachments: threadHasAttachments,
+            labels,
+            category: getCategoryFromLabels(labels),
+          });
+
+          // Store each message
+          for (const message of fullThread.messages) {
+            const parsed = parseGmailMessage(message, userEmail);
+
+            await ctx.runMutation(internal.sync.mutations.storeMessage, {
+              userId: user._id,
+              threadId,
+              gmailMessageId: parsed.gmailMessageId,
+              from: parsed.from,
+              to: parsed.to,
+              cc: parsed.cc,
+              bcc: parsed.bcc,
+              subject: parsed.subject,
+              bodyPlain: parsed.bodyPlain,
+              bodyHtml: parsed.bodyHtml,
+              snippet: parsed.snippet,
+              sentAt: parsed.sentAt,
+              receivedAt: parsed.receivedAt,
+              attachments: parsed.attachments,
+              isIncoming: parsed.isIncoming,
+            });
+          }
+
+          syncedCount++;
+        } catch (err) {
+          console.error(`Failed to sync thread ${gmailThreadId}:`, err);
+        }
+      }
+
+      // Update sync state
+      await ctx.runMutation(internal.sync.mutations.updateSyncState, {
+        userId: user._id,
+        syncInProgress: false,
+        isFullSync: false,
+        historyId: history.historyId,
+      });
+
+      return {
+        success: true,
+        changes: syncedCount,
+        message: `Synced ${syncedCount} changed threads`,
+      };
+    } catch (err) {
+      // If history is invalid (e.g., too old), trigger full sync
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      if (errorMessage.includes("404") || errorMessage.includes("historyId")) {
+        await ctx.runMutation(internal.sync.mutations.updateSyncState, {
+          userId: user._id,
+          syncInProgress: false,
+          isFullSync: false,
+        });
+        return { needsFullSync: true, message: "History expired, full sync required" };
+      }
+
+      await ctx.runMutation(internal.sync.mutations.updateSyncState, {
+        userId: user._id,
+        syncInProgress: false,
+        isFullSync: false,
+        syncError: errorMessage,
+      });
+
+      throw err;
+    }
+  },
+});
+
+/**
+ * Smart sync - tries incremental first, falls back to full
+ */
+export const smartSync = action({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not authenticated");
+    }
+
+    const user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
+      clerkId: identity.subject,
+    });
+
+    if (!user) {
+      throw new Error("User not found in database");
+    }
+
+    // Get sync state
+    const syncState = await ctx.runQuery(internal.sync.queries.getSyncState, {
+      userId: user._id,
+    });
+
+    // If no history ID or never synced, do full sync
+    if (!syncState?.historyId || !syncState.lastFullSyncAt) {
+      return await ctx.runAction(internal.sync.gmail.fullSyncInternal, {
+        clerkUserId: identity.subject,
+      });
+    }
+
+    // Try incremental sync
+    const result = await ctx.runAction(internal.sync.gmail.incrementalSyncInternal, {
+      clerkUserId: identity.subject,
+    });
+
+    // If incremental sync says full sync needed, do it
+    if (result.needsFullSync) {
+      return await ctx.runAction(internal.sync.gmail.fullSyncInternal, {
+        clerkUserId: identity.subject,
+      });
+    }
+
+    return result;
+  },
+});
+
+// Internal versions for cron/scheduled tasks
+import { internalAction } from "../_generated/server";
+import { v } from "convex/values";
+
+export const fullSyncInternal = internalAction({
+  args: { clerkUserId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
+      clerkId: args.clerkUserId,
+    });
+
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    await ctx.runMutation(internal.sync.mutations.updateSyncState, {
+      userId: user._id,
+      syncInProgress: true,
+      isFullSync: true,
+    });
+
+    try {
+      const accessToken = await getGoogleOAuthToken(args.clerkUserId);
+      const profile = await getGmailProfile(accessToken);
+      const userEmail = profile.email;
+
+      const threadList = await listGmailThreads(accessToken, 50);
+
+      if (!threadList.threads || threadList.threads.length === 0) {
+        await ctx.runMutation(internal.sync.mutations.updateSyncState, {
+          userId: user._id,
+          syncInProgress: false,
+          isFullSync: true,
+        });
+        await ctx.runMutation(internal.sync.mutations.setGmailConnected, {
+          userId: user._id,
+          connected: true,
+        });
+        return { success: true, threadsSynced: 0 };
+      }
+
+      let syncedCount = 0;
+
+      for (const threadRef of threadList.threads) {
+        try {
+          const fullThread = await getGmailThread(accessToken, threadRef.id);
+
+          if (!fullThread.messages || fullThread.messages.length === 0) {
+            continue;
+          }
+
+          const firstMessage = fullThread.messages[0];
+          const lastMessage = fullThread.messages[fullThread.messages.length - 1];
+          const parsedFirst = parseGmailMessage(firstMessage, userEmail);
+          const parsedLast = parseGmailMessage(lastMessage, userEmail);
+
+          const participantsMap = new Map<string, { email: string; name?: string }>();
+          for (const msg of fullThread.messages) {
+            const parsed = parseGmailMessage(msg, userEmail);
+            participantsMap.set(parsed.from.email, parsed.from);
+            for (const recipient of parsed.to) {
+              participantsMap.set(recipient.email, recipient);
+            }
+          }
+          const participants = Array.from(participantsMap.values()).slice(0, 10);
+
+          const labels = lastMessage.labelIds || [];
+          const threadHasAttachments = fullThread.messages.some(
+            (m) => parseGmailMessage(m, userEmail).attachments.length > 0
+          );
+
+          const threadId = await ctx.runMutation(internal.sync.mutations.storeThread, {
+            userId: user._id,
+            gmailThreadId: fullThread.id,
+            subject: parsedFirst.subject,
+            snippet: parsedLast.snippet,
+            participants,
+            messageCount: fullThread.messages.length,
+            lastMessageAt: parsedLast.receivedAt,
+            isRead: isEmailRead(labels),
+            isStarred: isEmailStarred(labels),
+            isArchived: isEmailArchived(labels),
+            isTrashed: isEmailTrashed(labels),
+            hasAttachments: threadHasAttachments,
+            labels,
+            category: getCategoryFromLabels(labels),
+          });
+
+          for (const message of fullThread.messages) {
+            const parsed = parseGmailMessage(message, userEmail);
+            await ctx.runMutation(internal.sync.mutations.storeMessage, {
+              userId: user._id,
+              threadId,
+              gmailMessageId: parsed.gmailMessageId,
+              from: parsed.from,
+              to: parsed.to,
+              cc: parsed.cc,
+              bcc: parsed.bcc,
+              subject: parsed.subject,
+              bodyPlain: parsed.bodyPlain,
+              bodyHtml: parsed.bodyHtml,
+              snippet: parsed.snippet,
+              sentAt: parsed.sentAt,
+              receivedAt: parsed.receivedAt,
+              attachments: parsed.attachments,
+              isIncoming: parsed.isIncoming,
+            });
+          }
+
+          syncedCount++;
+        } catch (err) {
+          console.error(`Failed to sync thread ${threadRef.id}:`, err);
+        }
+      }
+
+      await ctx.runMutation(internal.sync.mutations.updateSyncState, {
+        userId: user._id,
+        syncInProgress: false,
+        isFullSync: true,
+        historyId: threadList.threads[0]?.historyId,
+      });
+
+      await ctx.runMutation(internal.sync.mutations.setGmailConnected, {
+        userId: user._id,
+        connected: true,
+      });
+
+      return { success: true, threadsSynced: syncedCount };
+    } catch (err) {
+      await ctx.runMutation(internal.sync.mutations.updateSyncState, {
+        userId: user._id,
+        syncInProgress: false,
+        isFullSync: true,
+        syncError: err instanceof Error ? err.message : "Unknown error",
+      });
+      throw err;
+    }
+  },
+});
+
+export const incrementalSyncInternal = internalAction({
+  args: { clerkUserId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
+      clerkId: args.clerkUserId,
+    });
+
+    if (!user) {
+      return { needsFullSync: true, message: "User not found" };
+    }
+
+    const syncState = await ctx.runQuery(internal.sync.queries.getSyncState, {
+      userId: user._id,
+    });
+
+    if (!syncState?.historyId) {
+      return { needsFullSync: true, message: "No history ID" };
+    }
+
+    if (syncState.syncInProgress) {
+      return { skipped: true, message: "Sync in progress" };
+    }
+
+    await ctx.runMutation(internal.sync.mutations.updateSyncState, {
+      userId: user._id,
+      syncInProgress: true,
+      isFullSync: false,
+    });
+
+    try {
+      const accessToken = await getGoogleOAuthToken(args.clerkUserId);
+      const profile = await getGmailProfile(accessToken);
+      const userEmail = profile.email;
+
+      const history = await getGmailHistory(accessToken, syncState.historyId);
+
+      if (!history.history || history.history.length === 0) {
+        await ctx.runMutation(internal.sync.mutations.updateSyncState, {
+          userId: user._id,
+          syncInProgress: false,
+          isFullSync: false,
+          historyId: history.historyId,
+        });
+        return { success: true, changes: 0 };
+      }
+
+      const changedThreadIds = new Set<string>();
+      for (const entry of history.history) {
+        for (const added of entry.messagesAdded || []) {
+          changedThreadIds.add(added.message.threadId);
+        }
+        for (const labelChange of entry.labelsAdded || []) {
+          changedThreadIds.add(labelChange.message.threadId);
+        }
+        for (const labelChange of entry.labelsRemoved || []) {
+          changedThreadIds.add(labelChange.message.threadId);
+        }
+      }
+
+      let syncedCount = 0;
+
+      for (const gmailThreadId of changedThreadIds) {
+        try {
+          const fullThread = await getGmailThread(accessToken, gmailThreadId);
+
+          if (!fullThread.messages || fullThread.messages.length === 0) {
+            continue;
+          }
+
+          const firstMessage = fullThread.messages[0];
+          const lastMessage = fullThread.messages[fullThread.messages.length - 1];
+          const parsedFirst = parseGmailMessage(firstMessage, userEmail);
+          const parsedLast = parseGmailMessage(lastMessage, userEmail);
+
+          const participantsMap = new Map<string, { email: string; name?: string }>();
+          for (const msg of fullThread.messages) {
+            const parsed = parseGmailMessage(msg, userEmail);
+            participantsMap.set(parsed.from.email, parsed.from);
+            for (const recipient of parsed.to) {
+              participantsMap.set(recipient.email, recipient);
+            }
+          }
+          const participants = Array.from(participantsMap.values()).slice(0, 10);
+
+          const labels = lastMessage.labelIds || [];
+          const threadHasAttachments = fullThread.messages.some(
+            (m) => parseGmailMessage(m, userEmail).attachments.length > 0
+          );
+
+          const threadId = await ctx.runMutation(internal.sync.mutations.storeThread, {
+            userId: user._id,
+            gmailThreadId: fullThread.id,
+            subject: parsedFirst.subject,
+            snippet: parsedLast.snippet,
+            participants,
+            messageCount: fullThread.messages.length,
+            lastMessageAt: parsedLast.receivedAt,
+            isRead: isEmailRead(labels),
+            isStarred: isEmailStarred(labels),
+            isArchived: isEmailArchived(labels),
+            isTrashed: isEmailTrashed(labels),
+            hasAttachments: threadHasAttachments,
+            labels,
+            category: getCategoryFromLabels(labels),
+          });
+
+          for (const message of fullThread.messages) {
+            const parsed = parseGmailMessage(message, userEmail);
+            await ctx.runMutation(internal.sync.mutations.storeMessage, {
+              userId: user._id,
+              threadId,
+              gmailMessageId: parsed.gmailMessageId,
+              from: parsed.from,
+              to: parsed.to,
+              cc: parsed.cc,
+              bcc: parsed.bcc,
+              subject: parsed.subject,
+              bodyPlain: parsed.bodyPlain,
+              bodyHtml: parsed.bodyHtml,
+              snippet: parsed.snippet,
+              sentAt: parsed.sentAt,
+              receivedAt: parsed.receivedAt,
+              attachments: parsed.attachments,
+              isIncoming: parsed.isIncoming,
+            });
+          }
+
+          syncedCount++;
+        } catch (err) {
+          console.error(`Failed to sync thread ${gmailThreadId}:`, err);
+        }
+      }
+
+      await ctx.runMutation(internal.sync.mutations.updateSyncState, {
+        userId: user._id,
+        syncInProgress: false,
+        isFullSync: false,
+        historyId: history.historyId,
+      });
+
+      return { success: true, changes: syncedCount };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      if (errorMessage.includes("404") || errorMessage.includes("historyId")) {
+        await ctx.runMutation(internal.sync.mutations.updateSyncState, {
+          userId: user._id,
+          syncInProgress: false,
+          isFullSync: false,
+        });
+        return { needsFullSync: true };
+      }
+
+      await ctx.runMutation(internal.sync.mutations.updateSyncState, {
+        userId: user._id,
+        syncInProgress: false,
+        isFullSync: false,
+        syncError: errorMessage,
+      });
+      throw err;
+    }
+  },
+});
+
+/**
+ * Load more emails from Gmail (pagination)
+ * Fetches additional pages of threads from Gmail
+ */
+export const loadMoreEmails = action({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not authenticated");
+    }
+
+    const user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
+      clerkId: identity.subject,
+    });
+
+    if (!user) {
+      throw new Error("User not found in database");
+    }
+
+    // Get current sync state to check for page token
+    const syncState = await ctx.runQuery(internal.sync.queries.getSyncState, {
+      userId: user._id,
+    });
+
+    // Check if sync is already in progress
+    if (syncState?.syncInProgress) {
+      return { skipped: true, message: "Sync already in progress" };
+    }
+
+    try {
+      const accessToken = await getGoogleOAuthToken(identity.subject);
+      const profile = await getGmailProfile(accessToken);
+      const userEmail = profile.email;
+
+      // Get the oldest thread we have to determine what to fetch
+      const oldestThread = await ctx.runQuery(internal.sync.queries.getOldestThread, {
+        userId: user._id,
+      });
+
+      // Fetch more threads - use a query to get older threads
+      // We'll fetch threads without a specific page token but ask for more
+      const params = new URLSearchParams({
+        maxResults: "50",
+        labelIds: "INBOX",
+      });
+
+      // If we have an oldest thread, query for threads before that date
+      if (oldestThread) {
+        const beforeDate = new Date(oldestThread.lastMessageAt);
+        params.set("q", `before:${beforeDate.toISOString().split("T")[0]}`);
+      }
+
+      const threadList = await gmailFetch<GmailListResponse<{ id: string; historyId: string }>>(
+        `/threads?${params}`,
+        accessToken
+      );
+
+      if (!threadList.threads || threadList.threads.length === 0) {
+        return { success: true, threadsSynced: 0, message: "No more threads" };
+      }
+
+      let syncedCount = 0;
+
+      for (const threadRef of threadList.threads) {
+        try {
+          // Check if we already have this thread
+          const existingThread = await ctx.runQuery(internal.sync.queries.getThreadByGmailId, {
+            userId: user._id,
+            gmailThreadId: threadRef.id,
+          });
+
+          if (existingThread) {
+            continue; // Skip if already synced
+          }
+
+          const fullThread = await getGmailThread(accessToken, threadRef.id);
+
+          if (!fullThread.messages || fullThread.messages.length === 0) {
+            continue;
+          }
+
+          const firstMessage = fullThread.messages[0];
+          const lastMessage = fullThread.messages[fullThread.messages.length - 1];
+          const parsedFirst = parseGmailMessage(firstMessage, userEmail);
+          const parsedLast = parseGmailMessage(lastMessage, userEmail);
+
+          const participantsMap = new Map<string, { email: string; name?: string }>();
+          for (const msg of fullThread.messages) {
+            const parsed = parseGmailMessage(msg, userEmail);
+            participantsMap.set(parsed.from.email, parsed.from);
+            for (const recipient of parsed.to) {
+              participantsMap.set(recipient.email, recipient);
+            }
+          }
+          const participants = Array.from(participantsMap.values()).slice(0, 10);
+
+          const labels = lastMessage.labelIds || [];
+          const threadHasAttachments = fullThread.messages.some(
+            (m) => parseGmailMessage(m, userEmail).attachments.length > 0
+          );
+
+          const threadId = await ctx.runMutation(internal.sync.mutations.storeThread, {
+            userId: user._id,
+            gmailThreadId: fullThread.id,
+            subject: parsedFirst.subject,
+            snippet: parsedLast.snippet,
+            participants,
+            messageCount: fullThread.messages.length,
+            lastMessageAt: parsedLast.receivedAt,
+            isRead: isEmailRead(labels),
+            isStarred: isEmailStarred(labels),
+            isArchived: isEmailArchived(labels),
+            isTrashed: isEmailTrashed(labels),
+            hasAttachments: threadHasAttachments,
+            labels,
+            category: getCategoryFromLabels(labels),
+          });
+
+          for (const message of fullThread.messages) {
+            const parsed = parseGmailMessage(message, userEmail);
+            await ctx.runMutation(internal.sync.mutations.storeMessage, {
+              userId: user._id,
+              threadId,
+              gmailMessageId: parsed.gmailMessageId,
+              from: parsed.from,
+              to: parsed.to,
+              cc: parsed.cc,
+              bcc: parsed.bcc,
+              subject: parsed.subject,
+              bodyPlain: parsed.bodyPlain,
+              bodyHtml: parsed.bodyHtml,
+              snippet: parsed.snippet,
+              sentAt: parsed.sentAt,
+              receivedAt: parsed.receivedAt,
+              attachments: parsed.attachments,
+              isIncoming: parsed.isIncoming,
+            });
+          }
+
+          syncedCount++;
+        } catch (err) {
+          console.error(`Failed to sync thread ${threadRef.id}:`, err);
+        }
+      }
+
+      return {
+        success: true,
+        threadsSynced: syncedCount,
+        message: `Loaded ${syncedCount} more threads`,
+      };
+    } catch (err) {
+      console.error("Failed to load more emails:", err);
+      throw err;
+    }
+  },
+});
+
 // Export gmailFetch for use by other modules
 export { gmailFetch };

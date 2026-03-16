@@ -15,12 +15,12 @@ export const listThreads = query({
     isArchived: v.optional(v.boolean()),
     isUnread: v.optional(v.boolean()),
     limit: v.optional(v.number()),
-    cursor: v.optional(v.string()),
+    cursor: v.optional(v.number()), // Use lastMessageAt timestamp as cursor
   },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
-      return { threads: [], nextCursor: null };
+      return { threads: [], nextCursor: null, hasMore: false };
     }
 
     const user = await ctx.db
@@ -31,17 +31,23 @@ export const listThreads = query({
       .first();
 
     if (!user) {
-      return { threads: [], nextCursor: null };
+      return { threads: [], nextCursor: null, hasMore: false };
     }
 
-    const limit = args.limit ?? 50;
+    const limit = args.limit ?? 25;
 
+    // Get threads using index, ordered by lastMessageAt desc
     let threadsQuery = ctx.db
       .query("threads")
       .withIndex("by_user_last_message", (q) => q.eq("userId", user._id))
       .order("desc");
 
     let threads = await threadsQuery.collect();
+
+    // Apply cursor - filter to threads older than cursor timestamp
+    if (args.cursor) {
+      threads = threads.filter((t) => t.lastMessageAt < args.cursor!);
+    }
 
     // Apply filters
     threads = threads.filter((thread) => {
@@ -58,13 +64,19 @@ export const listThreads = query({
       threads = threads.filter((t) => !t.isArchived);
     }
 
-    // Pagination
+    // Get one more than limit to check if there are more
+    const hasMore = threads.length > limit;
     const paginatedThreads = threads.slice(0, limit);
-    const nextCursor = threads.length > limit ? threads[limit]._id : null;
+
+    // Use the last thread's timestamp as the cursor for next page
+    const nextCursor = hasMore && paginatedThreads.length > 0
+      ? paginatedThreads[paginatedThreads.length - 1].lastMessageAt
+      : null;
 
     return {
       threads: paginatedThreads,
       nextCursor,
+      hasMore,
     };
   },
 });

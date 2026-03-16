@@ -1,43 +1,84 @@
-import { useMutation } from "convex/react";
+import { useAction, useMutation } from "convex/react";
+import { useCallback, useState } from "react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 
 export function useEmailActions() {
-  const markAsReadMutation = useMutation(api.emails.mutations.markAsRead);
-  const toggleStarMutation = useMutation(api.emails.mutations.toggleStar);
-  const archiveMutation = useMutation(api.emails.mutations.archive);
-  const unarchiveMutation = useMutation(api.emails.mutations.unarchive);
-  const moveToTrashMutation = useMutation(api.emails.mutations.moveToTrash);
-  const restoreFromTrashMutation = useMutation(api.emails.mutations.restoreFromTrash);
+  const [isLoading, setIsLoading] = useState<string | null>(null);
+
+  // Use actions for Gmail sync
+  const markAsReadAction = useAction(api.emails.actions.markAsRead);
+  const toggleStarAction = useAction(api.emails.actions.toggleStar);
+  const archiveAction = useAction(api.emails.actions.archiveThread);
+  const unarchiveAction = useAction(api.emails.actions.unarchiveThread);
+  const trashAction = useAction(api.emails.actions.trashThread);
+  const untrashAction = useAction(api.emails.actions.untrashThread);
+
+  // Keep permanent delete as mutation (no Gmail sync needed)
   const permanentDeleteMutation = useMutation(api.emails.mutations.permanentDelete);
 
-  const markAsRead = async (threadId: Id<"threads">, isRead: boolean) => {
-    await markAsReadMutation({ threadId, isRead });
-  };
+  const markAsRead = useCallback(async (threadId: Id<"threads">, isRead: boolean) => {
+    setIsLoading(`read-${threadId}`);
+    try {
+      await markAsReadAction({ threadId, isRead });
+    } finally {
+      setIsLoading(null);
+    }
+  }, [markAsReadAction]);
 
-  const toggleStar = async (threadId: Id<"threads">) => {
-    await toggleStarMutation({ threadId });
-  };
+  const toggleStar = useCallback(async (threadId: Id<"threads">) => {
+    setIsLoading(`star-${threadId}`);
+    try {
+      await toggleStarAction({ threadId });
+    } finally {
+      setIsLoading(null);
+    }
+  }, [toggleStarAction]);
 
-  const archive = async (threadId: Id<"threads">) => {
-    await archiveMutation({ threadId });
-  };
+  const archive = useCallback(async (threadId: Id<"threads">) => {
+    setIsLoading(`archive-${threadId}`);
+    try {
+      await archiveAction({ threadId });
+    } finally {
+      setIsLoading(null);
+    }
+  }, [archiveAction]);
 
-  const unarchive = async (threadId: Id<"threads">) => {
-    await unarchiveMutation({ threadId });
-  };
+  const unarchive = useCallback(async (threadId: Id<"threads">) => {
+    setIsLoading(`unarchive-${threadId}`);
+    try {
+      await unarchiveAction({ threadId });
+    } finally {
+      setIsLoading(null);
+    }
+  }, [unarchiveAction]);
 
-  const moveToTrash = async (threadId: Id<"threads">) => {
-    await moveToTrashMutation({ threadId });
-  };
+  const moveToTrash = useCallback(async (threadId: Id<"threads">) => {
+    setIsLoading(`trash-${threadId}`);
+    try {
+      await trashAction({ threadId });
+    } finally {
+      setIsLoading(null);
+    }
+  }, [trashAction]);
 
-  const restoreFromTrash = async (threadId: Id<"threads">) => {
-    await restoreFromTrashMutation({ threadId });
-  };
+  const restoreFromTrash = useCallback(async (threadId: Id<"threads">) => {
+    setIsLoading(`restore-${threadId}`);
+    try {
+      await untrashAction({ threadId });
+    } finally {
+      setIsLoading(null);
+    }
+  }, [untrashAction]);
 
-  const permanentDelete = async (threadId: Id<"threads">) => {
-    await permanentDeleteMutation({ threadId });
-  };
+  const permanentDelete = useCallback(async (threadId: Id<"threads">) => {
+    setIsLoading(`delete-${threadId}`);
+    try {
+      await permanentDeleteMutation({ threadId });
+    } finally {
+      setIsLoading(null);
+    }
+  }, [permanentDeleteMutation]);
 
   return {
     markAsRead,
@@ -47,5 +88,6 @@ export function useEmailActions() {
     moveToTrash,
     restoreFromTrash,
     permanentDelete,
+    isLoading,
   };
 }

@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useRef, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Inbox } from "lucide-react";
+import { Inbox, Loader2 } from "lucide-react";
 import { EmailListItem } from "./EmailListItem";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Thread } from "@/types/email";
@@ -11,6 +11,9 @@ interface EmailListProps {
   onThreadClick: (threadId: Id<"threads">) => void;
   emptyMessage?: string;
   isLoading?: boolean;
+  hasMore?: boolean;
+  isLoadingMore?: boolean;
+  onLoadMore?: () => void;
 }
 
 interface GroupedThreads {
@@ -60,8 +63,42 @@ export function EmailList({
   onThreadClick,
   emptyMessage = "No emails",
   isLoading,
+  hasMore,
+  isLoadingMore,
+  onLoadMore,
 }: EmailListProps) {
   const groupedThreads = useMemo(() => groupThreadsByDate(threads), [threads]);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
+
+  // Infinite scroll using Intersection Observer
+  const handleObserver = useCallback(
+    (entries: IntersectionObserverEntry[]) => {
+      const [entry] = entries;
+      if (entry.isIntersecting && hasMore && !isLoadingMore && onLoadMore) {
+        onLoadMore();
+      }
+    },
+    [hasMore, isLoadingMore, onLoadMore]
+  );
+
+  useEffect(() => {
+    const element = loadMoreRef.current;
+    if (!element) return;
+
+    const observer = new IntersectionObserver(handleObserver, {
+      root: null,
+      rootMargin: "200px",
+      threshold: 0,
+    });
+
+    observer.observe(element);
+
+    return () => {
+      if (element) {
+        observer.unobserve(element);
+      }
+    };
+  }, [handleObserver]);
 
   if (isLoading) {
     return (
@@ -111,7 +148,7 @@ export function EmailList({
                     transition={{
                       duration: 0.16,
                       ease: [0.22, 1, 0.36, 1],
-                      delay: index * 0.03,
+                      delay: Math.min(index * 0.03, 0.15),
                     }}
                   >
                     <EmailListItem
@@ -124,6 +161,21 @@ export function EmailList({
             </motion.div>
           ))}
         </AnimatePresence>
+
+        {/* Load more trigger / loading indicator */}
+        <div ref={loadMoreRef} className="py-4 flex justify-center">
+          {isLoadingMore && (
+            <div className="flex items-center gap-2 text-[var(--muted-foreground)]">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Loading more emails...</span>
+            </div>
+          )}
+          {!hasMore && threads.length > 10 && (
+            <p className="text-sm text-[var(--muted-foreground)]">
+              You've reached the end
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );
