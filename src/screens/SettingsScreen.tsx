@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { useUser, useClerk, UserButton } from "@clerk/react";
 import { useQuery, useMutation } from "convex/react";
-import { Moon, Sun, Monitor, LogOut } from "lucide-react";
+import { Moon, Sun, Monitor, LogOut, Trash2, Loader2 } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,21 @@ export function SettingsScreen() {
   const { signOut } = useClerk();
   const currentUser = useQuery(api.users.current);
   const updateSettings = useMutation(api.users.updateSettings);
+  const clearData = useMutation(api.dev.seed.clearSampleData);
+  const [isClearing, setIsClearing] = useState(false);
+
+  const handleClearData = async () => {
+    if (!confirm("This will delete all your email data. Are you sure?")) return;
+
+    setIsClearing(true);
+    try {
+      await clearData({});
+    } catch (error) {
+      console.error("Failed to clear data:", error);
+    } finally {
+      setIsClearing(false);
+    }
+  };
 
   const handleThemeChange = async (theme: "system" | "light" | "dark") => {
     if (!currentUser?.settings) return;
@@ -92,6 +108,26 @@ export function SettingsScreen() {
               />
             </div>
           </div>
+        </section>
+
+        {/* Data management */}
+        <section className="p-4 pt-0">
+          <h2 className="text-sm font-medium text-[var(--muted-foreground)] mb-2 px-1">
+            Data
+          </h2>
+          <Button
+            variant="outline"
+            className="w-full justify-start gap-3 h-12"
+            onClick={handleClearData}
+            disabled={isClearing}
+          >
+            {isClearing ? (
+              <Loader2 className="h-5 w-5 animate-spin text-[var(--destructive)]" />
+            ) : (
+              <Trash2 className="h-5 w-5 text-[var(--destructive)]" />
+            )}
+            <span className="text-[var(--destructive)]">Clear All Email Data</span>
+          </Button>
         </section>
 
         {/* Sign out */}

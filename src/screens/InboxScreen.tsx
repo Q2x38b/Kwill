@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useAction } from "convex/react";
+import { useSession } from "@clerk/react";
 import { motion } from "framer-motion";
-import { Inbox, Loader2, Sparkles } from "lucide-react";
+import { Inbox, Loader2, RefreshCw } from "lucide-react";
 import { api } from "../../convex/_generated/api";
 import { Header } from "@/components/layout/Header";
 import { EmailList } from "@/components/email/EmailList";
@@ -12,8 +13,10 @@ import type { EmailCategory, EmailFilter } from "@/types/email";
 
 export function InboxScreen() {
   const navigate = useNavigate();
+  const { session } = useSession();
   const [filters, setFilters] = useState<EmailFilter>({});
-  const [isSeeding, setIsSeeding] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const result = useQuery(api.emails.queries.listThreads, {
     category: filters.category,
@@ -21,7 +24,7 @@ export function InboxScreen() {
     isUnread: filters.isUnread,
   });
 
-  const seedData = useMutation(api.dev.seed.seedSampleData);
+  const syncGmail = useAction(api.sync.gmail.fullSync);
   const currentUser = useQuery(api.users.current);
 
   const threads = result?.threads ?? [];
@@ -35,19 +38,49 @@ export function InboxScreen() {
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleSeedData = async () => {
-    setIsSeeding(true);
+  const handleSyncGmail = async () => {
+    if (!session) return;
+
+    setIsSyncing(true);
+    setSyncError(null);
+
     try {
-      await seedData({});
+      // Get OAuth token from Clerk - requires "oauth_google" JWT template
+      // that includes the Google OAuth access token
+      const token = await session.getToken({ template: "oauth_google" });
+
+      if (!token) {
+        setSyncError(
+          "Gmail OAuth token not available. Create an 'oauth_google' JWT template in Clerk Dashboard with the Google access token."
+        );
+        return;
+      }
+
+      const result = await syncGmail({ accessToken: token });
+      console.log("Gmail sync result:", result);
     } catch (error) {
-      console.error("Failed to seed data:", error);
+      console.error("Failed to sync Gmail:", error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to sync Gmail";
+
+      // Provide more helpful error messages
+      if (errorMessage.includes("template") || errorMessage.includes("JWT")) {
+        setSyncError(
+          "JWT template 'oauth_google' not found. Please create it in Clerk Dashboard > JWT Templates."
+        );
+      } else if (errorMessage.includes("401") || errorMessage.includes("403")) {
+        setSyncError(
+          "Gmail access denied. Ensure your Google account has Gmail API access enabled."
+        );
+      } else {
+        setSyncError(errorMessage);
+      }
     } finally {
-      setIsSeeding(false);
+      setIsSyncing(false);
     }
   };
 
-  // Show empty state with seed option if no threads and Gmail not connected
-  const showEmptyState = !isLoading && threads.length === 0 && !currentUser?.gmailConnected;
+  // Show empty state if no threads
+  const showEmptyState = !isLoading && threads.length === 0;
 
   return (
     <div className="flex flex-col h-full">
@@ -77,26 +110,31 @@ export function InboxScreen() {
             </div>
             <h2 className="text-lg font-semibold mb-2">No emails yet</h2>
             <p className="text-sm text-[var(--muted-foreground)] mb-6">
-              Connect your Gmail account in Settings, or load sample data to explore the app.
+              {currentUser?.gmailConnected
+                ? "Sync your Gmail to see your emails."
+                : "Sign in with Google to sync your Gmail inbox."}
             </p>
+            {syncError && (
+              <p className="text-sm text-[var(--destructive)] mb-4">{syncError}</p>
+            )}
             <div className="flex flex-col gap-3">
               <Button
-                onClick={handleSeedData}
-                disabled={isSeeding}
+                onClick={handleSyncGmail}
+                disabled={isSyncing}
                 className="gap-2"
               >
-                {isSeeding ? (
+                {isSyncing ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Sparkles className="h-4 w-4" />
+                  <RefreshCw className="h-4 w-4" />
                 )}
-                Load Sample Emails
+                Sync Gmail
               </Button>
               <Button
                 variant="outline"
                 onClick={() => navigate("/settings")}
               >
-                Connect Gmail
+                Settings
               </Button>
             </div>
           </motion.div>

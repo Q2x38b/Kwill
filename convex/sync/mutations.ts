@@ -186,6 +186,22 @@ export const storeMessage = internalMutation({
 });
 
 /**
+ * Set Gmail connected status
+ */
+export const setGmailConnected = internalMutation({
+  args: {
+    userId: v.id("users"),
+    connected: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.userId, {
+      gmailConnected: args.connected,
+      lastSyncAt: args.connected ? Date.now() : undefined,
+    });
+  },
+});
+
+/**
  * Update sync state
  */
 export const updateSyncState = internalMutation({
