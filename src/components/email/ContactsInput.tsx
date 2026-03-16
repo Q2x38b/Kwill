@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useQuery } from "convex/react";
-import { X, Search } from "lucide-react";
+import { X, BadgeCheck } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { api } from "../../../convex/_generated/api";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ interface Contact {
   email: string;
   name?: string;
   avatarUrl?: string;
+  googleResourceName?: string;
 }
 
 // Store contact details for display
@@ -17,6 +18,7 @@ interface ContactChip {
   email: string;
   name?: string;
   avatarUrl?: string;
+  isVerified?: boolean;
 }
 
 interface ContactsInputProps {
@@ -26,7 +28,26 @@ interface ContactsInputProps {
   className?: string;
 }
 
-// Generate a consistent color from a string
+// Generate a consistent gradient color for disco ball avatar
+function getAvatarGradient(str: string): { bg: string; dots: string } {
+  const gradients = [
+    { bg: "from-pink-500 to-rose-500", dots: "bg-pink-300" },
+    { bg: "from-purple-500 to-violet-500", dots: "bg-purple-300" },
+    { bg: "from-blue-500 to-indigo-500", dots: "bg-blue-300" },
+    { bg: "from-cyan-500 to-teal-500", dots: "bg-cyan-300" },
+    { bg: "from-emerald-500 to-green-500", dots: "bg-emerald-300" },
+    { bg: "from-yellow-500 to-orange-500", dots: "bg-yellow-300" },
+    { bg: "from-rose-500 to-pink-500", dots: "bg-rose-300" },
+    { bg: "from-indigo-500 to-purple-500", dots: "bg-indigo-300" },
+  ];
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return gradients[Math.abs(hash) % gradients.length];
+}
+
+// Generate a consistent color from a string (for fallback)
 function getAvatarColor(str: string): string {
   const colors = [
     "bg-rose-500",
@@ -51,6 +72,35 @@ function getAvatarColor(str: string): string {
     hash = str.charCodeAt(i) + ((hash << 5) - hash);
   }
   return colors[Math.abs(hash) % colors.length];
+}
+
+// Disco ball style avatar component
+function DiscoBallAvatar({ email, size = "md" }: { email: string; size?: "sm" | "md" }) {
+  const gradient = getAvatarGradient(email);
+  const sizeClasses = size === "sm" ? "w-6 h-6" : "w-10 h-10";
+  const dotSize = size === "sm" ? "w-1 h-1" : "w-1.5 h-1.5";
+
+  return (
+    <div className={cn(
+      sizeClasses,
+      "rounded-full bg-gradient-to-br relative overflow-hidden shrink-0",
+      gradient.bg
+    )}>
+      {/* Disco ball dot pattern */}
+      <div className="absolute inset-0 grid grid-cols-4 grid-rows-4 gap-[2px] p-1">
+        {Array.from({ length: 16 }).map((_, i) => (
+          <div
+            key={i}
+            className={cn(
+              dotSize,
+              "rounded-full opacity-60",
+              gradient.dots
+            )}
+          />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function ContactsInput({
@@ -99,6 +149,7 @@ export function ContactsInput({
               email: trimmed,
               name: contact.name,
               avatarUrl: contact.avatarUrl,
+              isVerified: !!contact.googleResourceName,
             });
             return next;
           });
@@ -217,7 +268,7 @@ export function ContactsInput({
               exit={{ opacity: 0, scale: 0.9 }}
               className="inline-flex items-center gap-2 pl-1 pr-2 py-1 rounded-full bg-[var(--secondary)] text-sm group"
             >
-              {/* Avatar */}
+              {/* Avatar - disco ball style */}
               {details?.avatarUrl ? (
                 <img
                   src={details.avatarUrl}
@@ -225,19 +276,15 @@ export function ContactsInput({
                   className="w-6 h-6 rounded-full object-cover"
                 />
               ) : (
-                <div
-                  className={cn(
-                    "w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-medium text-white",
-                    getAvatarColor(email)
-                  )}
-                >
-                  {getInitials(email)}
-                </div>
+                <DiscoBallAvatar email={email} size="sm" />
               )}
 
-              {/* Name/Email */}
-              <span className="truncate max-w-[120px] text-[var(--foreground)]">
+              {/* Name/Email with verified badge */}
+              <span className="truncate max-w-[120px] text-[var(--foreground)] flex items-center gap-1">
                 {getChipDisplay(email)}
+                {details?.isVerified && (
+                  <BadgeCheck className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                )}
               </span>
 
               {/* Remove button */}
@@ -272,69 +319,54 @@ export function ContactsInput({
       <AnimatePresence>
         {showSuggestions && (
           <motion.div
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            className="absolute top-full left-0 right-0 mt-2 bg-[var(--popover)] border border-[var(--border)] rounded-xl shadow-lg overflow-hidden z-50"
+            initial={{ opacity: 0, y: -4, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.98 }}
+            transition={{ duration: 0.15 }}
+            className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-[var(--card)] rounded-2xl shadow-xl border border-gray-100 dark:border-[var(--border)] overflow-hidden z-50"
           >
-            {/* Search header */}
-            <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[var(--border)] text-[var(--muted-foreground)]">
-              <Search className="w-4 h-4" />
-              <span className="text-sm">Search in contacts...</span>
-            </div>
-
             {/* Contact suggestions */}
-            {suggestions.map((contact, index) => (
-              <button
-                key={contact._id}
-                type="button"
-                onClick={() => handleSuggestionClick(contact)}
-                className={cn(
-                  "w-full flex items-center gap-3 px-3 py-3 text-left transition-colors",
-                  index === selectedIndex
-                    ? "bg-[var(--accent)]"
-                    : "hover:bg-[var(--accent)]"
-                )}
-              >
-                {/* Avatar */}
-                {contact.avatarUrl ? (
-                  <img
-                    src={contact.avatarUrl}
-                    alt={contact.name || contact.email}
-                    className="w-9 h-9 rounded-full object-cover"
-                  />
-                ) : (
-                  <div
-                    className={cn(
-                      "w-9 h-9 rounded-full flex items-center justify-center text-sm font-medium text-white shrink-0",
-                      getAvatarColor(contact.email)
-                    )}
-                  >
-                    {contact.name?.[0]?.toUpperCase() ||
-                      contact.email[0].toUpperCase()}
-                  </div>
-                )}
+            <div className="py-2">
+              {suggestions.map((contact, index) => {
+                const isVerified = !!contact.googleResourceName;
+                const displayName = contact.name || contact.email.split("@")[0];
 
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  {contact.name && (
-                    <p className="text-sm font-medium truncate text-[var(--foreground)]">
-                      {contact.name}
-                    </p>
-                  )}
-                  <p
+                return (
+                  <button
+                    key={contact._id}
+                    type="button"
+                    onClick={() => handleSuggestionClick(contact)}
                     className={cn(
-                      "text-sm truncate",
-                      contact.name
-                        ? "text-[var(--muted-foreground)]"
-                        : "text-[var(--foreground)]"
+                      "w-full flex items-center gap-3 px-4 py-3 text-left transition-colors",
+                      index === selectedIndex
+                        ? "bg-gray-50 dark:bg-[var(--accent)]"
+                        : "hover:bg-gray-50 dark:hover:bg-[var(--accent)]"
                     )}
                   >
-                    {contact.email}
-                  </p>
-                </div>
-              </button>
-            ))}
+                    {/* Avatar - disco ball style */}
+                    {contact.avatarUrl ? (
+                      <img
+                        src={contact.avatarUrl}
+                        alt={displayName}
+                        className="w-10 h-10 rounded-full object-cover"
+                      />
+                    ) : (
+                      <DiscoBallAvatar email={contact.email} size="md" />
+                    )}
+
+                    {/* Name with verified badge */}
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-[15px] font-medium text-gray-900 dark:text-[var(--foreground)] truncate">
+                        {displayName}
+                      </span>
+                      {isVerified && (
+                        <BadgeCheck className="w-4 h-4 text-blue-500 shrink-0" />
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

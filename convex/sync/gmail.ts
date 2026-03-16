@@ -703,6 +703,17 @@ export const fullSyncInternal = internalAction({
         console.log("Failed to set up Gmail watch (non-fatal):", watchError);
       }
 
+      // Sync Google Contacts
+      try {
+        const contactsResult = await ctx.runAction(internal.sync.gmail.syncGoogleContacts, {
+          clerkUserId: args.clerkUserId,
+        });
+        console.log(`Synced ${contactsResult.contactsSynced} contacts for ${userEmail}`);
+      } catch (contactsError) {
+        // Non-fatal - contacts sync is optional
+        console.log("Failed to sync contacts (non-fatal):", contactsError);
+      }
+
       return { success: true, threadsSynced: syncedCount };
     } catch (err) {
       await ctx.runMutation(internal.sync.mutations.updateSyncState, {
@@ -1354,6 +1365,142 @@ export const autoSetup = action({
       console.error(`Auto-setup failed for ${user.email}:`, errorMsg);
       return { success: false, message: errorMsg };
     }
+  },
+});
+
+/**
+ * Sync contacts from Google People API
+ * Uses the contacts.readonly scope through Clerk OAuth
+ */
+const PEOPLE_API_BASE = "https://people.googleapis.com/v1";
+
+interface GoogleContact {
+  resourceName: string;
+  names?: Array<{ displayName?: string; givenName?: string; familyName?: string }>;
+  emailAddresses?: Array<{ value?: string }>;
+  phoneNumbers?: Array<{ value?: string }>;
+  photos?: Array<{ url?: string }>;
+}
+
+interface PeopleConnectionsResponse {
+  connections?: GoogleContact[];
+  nextPageToken?: string;
+  totalPeople?: number;
+}
+
+async function fetchGoogleContacts(
+  accessToken: string,
+  pageToken?: string
+): Promise<PeopleConnectionsResponse> {
+  const params = new URLSearchParams({
+    personFields: "names,emailAddresses,phoneNumbers,photos",
+    pageSize: "100",
+    sortOrder: "LAST_MODIFIED_DESCENDING",
+  });
+  if (pageToken) {
+    params.set("pageToken", pageToken);
+  }
+
+  const response = await fetch(
+    `${PEOPLE_API_BASE}/people/me/connections?${params}`,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`People API error: ${response.status} - ${error}`);
+  }
+
+  return response.json();
+}
+
+export const syncGoogleContacts = internalAction({
+  args: { clerkUserId: v.string() },
+  handler: async (ctx, args): Promise<{ success: boolean; contactsSynced: number; error?: string }> => {
+    const user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
+      clerkId: args.clerkUserId,
+    });
+
+    if (!user) {
+      return { success: false, contactsSynced: 0, error: "User not found" };
+    }
+
+    try {
+      const accessToken = await getGoogleOAuthToken(args.clerkUserId);
+
+      let syncedCount = 0;
+      let pageToken: string | undefined;
+
+      // Fetch all contacts pages (up to 500 contacts)
+      do {
+        const response = await fetchGoogleContacts(accessToken, pageToken);
+
+        if (response.connections) {
+          for (const contact of response.connections) {
+            // Only process contacts with email addresses
+            const emails = contact.emailAddresses?.filter((e) => e.value) || [];
+            if (emails.length === 0) continue;
+
+            const name = contact.names?.[0]?.displayName;
+            const avatarUrl = contact.photos?.[0]?.url;
+            const phoneNumbers = contact.phoneNumbers
+              ?.map((p) => p.value)
+              .filter((v): v is string => !!v);
+
+            // Store each email as a separate contact entry
+            for (const emailObj of emails) {
+              if (!emailObj.value) continue;
+
+              try {
+                await ctx.runMutation(internal.sync.mutations.storeContact, {
+                  userId: user._id,
+                  email: emailObj.value,
+                  name,
+                  avatarUrl,
+                  phoneNumbers,
+                  googleResourceName: contact.resourceName,
+                });
+                syncedCount++;
+              } catch (err) {
+                console.error(`Failed to store contact ${emailObj.value}:`, err);
+              }
+            }
+          }
+        }
+
+        pageToken = response.nextPageToken;
+      } while (pageToken && syncedCount < 500);
+
+      console.log(`Synced ${syncedCount} contacts for user ${user.email}`);
+
+      return { success: true, contactsSynced: syncedCount };
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Unknown error";
+      console.error(`Failed to sync contacts for ${user.email}:`, errorMsg);
+      return { success: false, contactsSynced: 0, error: errorMsg };
+    }
+  },
+});
+
+/**
+ * Public action to sync Google Contacts
+ */
+export const syncContacts = action({
+  args: {},
+  handler: async (ctx): Promise<{ success: boolean; contactsSynced: number; error?: string }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not authenticated");
+    }
+
+    return await ctx.runAction(internal.sync.gmail.syncGoogleContacts, {
+      clerkUserId: identity.subject,
+    });
   },
 });
 

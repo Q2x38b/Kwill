@@ -281,3 +281,51 @@ export const updateWatchState = internalMutation({
     }
   },
 });
+
+/**
+ * Store or update a contact from Google Contacts API
+ */
+export const storeContact = internalMutation({
+  args: {
+    userId: v.id("users"),
+    email: v.string(),
+    name: v.optional(v.string()),
+    avatarUrl: v.optional(v.string()),
+    phoneNumbers: v.optional(v.array(v.string())),
+    googleResourceName: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    // Check if contact already exists
+    const existing = await ctx.db
+      .query("contacts")
+      .withIndex("by_user_email", (q) =>
+        q.eq("userId", args.userId).eq("email", args.email.toLowerCase())
+      )
+      .first();
+
+    if (existing) {
+      // Update existing contact with Google Contacts data (richer data)
+      await ctx.db.patch(existing._id, {
+        name: args.name || existing.name,
+        avatarUrl: args.avatarUrl || existing.avatarUrl,
+        phoneNumbers: args.phoneNumbers || existing.phoneNumbers,
+        googleResourceName: args.googleResourceName || existing.googleResourceName,
+      });
+      return existing._id;
+    }
+
+    // Create new contact
+    const contactId = await ctx.db.insert("contacts", {
+      userId: args.userId,
+      email: args.email.toLowerCase(),
+      name: args.name,
+      avatarUrl: args.avatarUrl,
+      phoneNumbers: args.phoneNumbers,
+      googleResourceName: args.googleResourceName,
+      emailCount: 0,
+      isFavorite: false,
+    });
+
+    return contactId;
+  },
+});
