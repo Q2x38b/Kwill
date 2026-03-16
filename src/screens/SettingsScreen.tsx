@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useUser, useClerk, UserButton } from "@clerk/clerk-react";
+import { useUser, useClerk, UserButton } from "@clerk/react";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { Moon, Sun, Monitor, LogOut, Trash2, Loader2, Bell, BellOff, RefreshCw } from "lucide-react";
 import { api } from "../../convex/_generated/api";
