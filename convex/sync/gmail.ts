@@ -1,35 +1,8 @@
 "use node";
 
-import { v } from "convex/values";
 import { action } from "../_generated/server";
-import { internal } from "../_generated/api";
-import type { Id } from "../_generated/dataModel";
-import type {
-  GmailThread,
-  GmailMessage,
-  GmailListResponse,
-  GmailHistoryResponse,
-} from "../lib/gmail_types";
-import {
-  parseGmailMessage,
-  isEmailRead,
-  isEmailStarred,
-  isEmailArchived,
-  isEmailTrashed,
-  getCategoryFromLabels,
-  hasAttachments,
-} from "../lib/gmail_parser";
 
 const GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
-const MAX_THREADS_PER_SYNC = 100;
-const RETRY_DELAY_MS = 60000; // 60 seconds
-const MAX_RETRIES = 3;
-
-interface SyncContext {
-  accessToken: string;
-  userId: Id<"users">;
-  userEmail: string;
-}
 
 /**
  * Make an authenticated request to Gmail API
@@ -56,67 +29,6 @@ async function gmailFetch<T>(
   }
 
   return response.json();
-}
-
-/**
- * List threads from Gmail
- */
-async function listThreads(
-  accessToken: string,
-  pageToken?: string,
-  maxResults = 50
-): Promise<GmailListResponse<{ id: string; historyId: string }>> {
-  const params = new URLSearchParams({
-    maxResults: maxResults.toString(),
-    labelIds: "INBOX",
-  });
-
-  if (pageToken) {
-    params.set("pageToken", pageToken);
-  }
-
-  return gmailFetch(`/threads?${params}`, accessToken);
-}
-
-/**
- * Get a full thread with messages
- */
-async function getThread(
-  accessToken: string,
-  threadId: string
-): Promise<GmailThread> {
-  return gmailFetch(`/threads/${threadId}?format=full`, accessToken);
-}
-
-/**
- * Get message details
- */
-async function getMessage(
-  accessToken: string,
-  messageId: string
-): Promise<GmailMessage> {
-  return gmailFetch(`/messages/${messageId}?format=full`, accessToken);
-}
-
-/**
- * Get history changes since a historyId
- */
-async function getHistory(
-  accessToken: string,
-  startHistoryId: string,
-  pageToken?: string
-): Promise<GmailHistoryResponse> {
-  const params = new URLSearchParams({
-    startHistoryId,
-    labelId: "INBOX",
-    historyTypes: "messageAdded,messageDeleted,labelAdded,labelRemoved",
-  });
-
-  if (pageToken) {
-    params.set("pageToken", pageToken);
-  }
-
-  return gmailFetch(`/history?${params}`, accessToken);
 }
 
 /**
@@ -147,3 +59,6 @@ export const fullSync = action({
     return { success: true, message: "Sync initiated" };
   },
 });
+
+// Export gmailFetch for use by other modules
+export { gmailFetch };

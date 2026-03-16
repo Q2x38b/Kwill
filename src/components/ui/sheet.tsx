@@ -59,11 +59,15 @@ function SheetContent({
   size = "md",
   showHandle = true,
   onClose,
-  // Exclude onDragEnd from props to avoid conflict with framer-motion
+  // Exclude drag handlers from props to avoid conflict with framer-motion
+  onDrag: _onDrag,
   onDragEnd: _onDragEnd,
+  onDragStart: _onDragStart,
   ...props
 }: SheetContentProps) {
-  void _onDragEnd; // Suppress unused variable warning
+  void _onDrag;
+  void _onDragEnd;
+  void _onDragStart;
   const context = React.useContext(SheetContext);
   if (!context) throw new Error("SheetContent must be used within Sheet");
 
