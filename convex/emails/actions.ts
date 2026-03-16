@@ -484,6 +484,140 @@ export const fetchThreadContent = action({
 });
 
 /**
+ * Send an email via Gmail API
+ */
+export const sendEmail = action({
+  args: {
+    to: v.array(v.string()),
+    cc: v.optional(v.array(v.string())),
+    bcc: v.optional(v.array(v.string())),
+    subject: v.string(),
+    body: v.string(),
+    replyToMessageId: v.optional(v.string()),
+    replyToThreadId: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<{ success: boolean; messageId?: string; threadId?: string; error?: string }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not authenticated");
+    }
+
+    try {
+      const accessToken = await getGoogleOAuthToken(identity.subject);
+
+      // Get user's email for the From header
+      const profileResponse = await gmailFetch("/profile", accessToken);
+      if (!profileResponse.ok) {
+        throw new Error("Failed to get Gmail profile");
+      }
+      const profile = await profileResponse.json();
+      const userEmail = profile.emailAddress;
+
+      // Build MIME message
+      const mimeMessage = buildMimeMessage({
+        from: userEmail,
+        to: args.to,
+        cc: args.cc,
+        bcc: args.bcc,
+        subject: args.subject,
+        body: args.body,
+        replyToMessageId: args.replyToMessageId,
+      });
+
+      // Encode to base64url
+      const encodedMessage = btoa(mimeMessage)
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+
+      // Build request body
+      const requestBody: { raw: string; threadId?: string } = { raw: encodedMessage };
+      if (args.replyToThreadId) {
+        requestBody.threadId = args.replyToThreadId;
+      }
+
+      // Send via Gmail API
+      const response = await gmailFetch("/messages/send", accessToken, {
+        method: "POST",
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const error = await response.text();
+        console.error("Gmail send error:", error);
+        throw new Error(`Failed to send email: ${response.status} - ${error}`);
+      }
+
+      const result = await response.json();
+
+      // Trigger a sync to update local state with the sent message
+      try {
+        await ctx.runAction(internal.sync.gmail.incrementalSyncInternal, {
+          clerkUserId: identity.subject,
+        });
+      } catch (syncError) {
+        console.log("Post-send sync failed (non-fatal):", syncError);
+      }
+
+      return {
+        success: true,
+        messageId: result.id,
+        threadId: result.threadId,
+      };
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      console.error("Failed to send email:", errorMessage);
+      return { success: false, error: errorMessage };
+    }
+  },
+});
+
+/**
+ * Build a MIME message for Gmail API
+ */
+function buildMimeMessage(args: {
+  from: string;
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  body: string;
+  replyToMessageId?: string;
+}): string {
+  const lines: string[] = [];
+
+  // Headers
+  lines.push(`From: ${args.from}`);
+  lines.push(`To: ${args.to.join(", ")}`);
+
+  if (args.cc && args.cc.length > 0) {
+    lines.push(`Cc: ${args.cc.join(", ")}`);
+  }
+
+  if (args.bcc && args.bcc.length > 0) {
+    lines.push(`Bcc: ${args.bcc.join(", ")}`);
+  }
+
+  // Encode subject for UTF-8 support
+  const encodedSubject = `=?UTF-8?B?${btoa(unescape(encodeURIComponent(args.subject)))}?=`;
+  lines.push(`Subject: ${encodedSubject}`);
+
+  // Reply headers
+  if (args.replyToMessageId) {
+    lines.push(`In-Reply-To: ${args.replyToMessageId}`);
+    lines.push(`References: ${args.replyToMessageId}`);
+  }
+
+  lines.push("MIME-Version: 1.0");
+  lines.push("Content-Type: text/plain; charset=UTF-8");
+  lines.push("Content-Transfer-Encoding: 7bit");
+  lines.push(""); // Empty line before body
+  lines.push(args.body);
+
+  return lines.join("\r\n");
+}
+
+/**
  * Parse message body from Gmail API response
  */
 function parseMessageBody(gmailMessage: {

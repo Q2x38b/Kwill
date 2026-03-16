@@ -1302,5 +1302,60 @@ export const renewExpiringWatches = internalAction({
   },
 });
 
+/**
+ * Auto-setup Gmail for new users who signed in with Google
+ * This is called automatically after user creation to set up Gmail sync
+ * and push notifications without requiring manual action in settings
+ */
+export const autoSetup = action({
+  args: {},
+  handler: async (ctx): Promise<{ success: boolean; message: string; alreadySetUp?: boolean }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return { success: false, message: "Not authenticated" };
+    }
+
+    // Get user from database
+    const user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
+      clerkId: identity.subject,
+    });
+
+    if (!user) {
+      return { success: false, message: "User not found" };
+    }
+
+    // Check if already set up
+    if (user.gmailConnected) {
+      return { success: true, message: "Gmail already connected", alreadySetUp: true };
+    }
+
+    // Try to get Google OAuth token - if this fails, user didn't sign in with Google
+    try {
+      await getGoogleOAuthToken(identity.subject);
+    } catch {
+      // User doesn't have Google OAuth token - they didn't sign in with Google
+      return { success: false, message: "No Google OAuth token found - user may not have signed in with Google" };
+    }
+
+    // User has Google OAuth, trigger full sync which sets up everything
+    console.log(`Auto-setting up Gmail for user ${user.email}`);
+
+    try {
+      const result = await ctx.runAction(internal.sync.gmail.fullSyncInternal, {
+        clerkUserId: identity.subject,
+      });
+
+      return {
+        success: true,
+        message: `Auto-setup complete. Synced ${result.threadsSynced} threads.`,
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      console.error(`Auto-setup failed for ${user.email}:`, errorMsg);
+      return { success: false, message: errorMsg };
+    }
+  },
+});
+
 // Export gmailFetch for use by other modules
 export { gmailFetch };

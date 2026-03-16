@@ -228,67 +228,73 @@ export const listSentThreads = query({
     cursor: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
+    try {
+      const identity = await ctx.auth.getUserIdentity();
+      if (!identity) {
+        return { threads: [], nextCursor: null, hasMore: false };
+      }
+
+      const user = await ctx.db
+        .query("users")
+        .withIndex("by_clerk_id", (q) =>
+          q.eq("clerkId", identity.subject)
+        )
+        .first();
+
+      if (!user) {
+        return { threads: [], nextCursor: null, hasMore: false };
+      }
+
+      const limit = args.limit ?? 25;
+
+      // Get all threads for this user and filter for ones with sent messages
+      const allThreads = await ctx.db
+        .query("threads")
+        .withIndex("by_user_last_message", (q) => q.eq("userId", user._id))
+        .order("desc")
+        .collect();
+
+      // For each thread, check if user has sent any messages
+      const threadsWithSentMessages = [];
+      for (const thread of allThreads) {
+        if (thread.isTrashed) continue;
+
+        const messages = await ctx.db
+          .query("messages")
+          .withIndex("by_thread", (q) => q.eq("threadId", thread._id))
+          .collect();
+
+        const hasSentMessage = messages.some((m) => !m.isIncoming);
+        if (hasSentMessage) {
+          threadsWithSentMessages.push(thread);
+        }
+      }
+
+      // Apply cursor
+      let filteredThreads = threadsWithSentMessages;
+      if (args.cursor) {
+        filteredThreads = filteredThreads.filter(
+          (t) => t.lastMessageAt < args.cursor!
+        );
+      }
+
+      // Paginate
+      const hasMore = filteredThreads.length > limit;
+      const paginatedThreads = filteredThreads.slice(0, limit);
+      const nextCursor =
+        hasMore && paginatedThreads.length > 0
+          ? paginatedThreads[paginatedThreads.length - 1].lastMessageAt
+          : null;
+
+      return {
+        threads: paginatedThreads,
+        nextCursor,
+        hasMore,
+      };
+    } catch (error) {
+      console.error("listSentThreads error:", error);
       return { threads: [], nextCursor: null, hasMore: false };
     }
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q) =>
-        q.eq("clerkId", identity.subject)
-      )
-      .first();
-
-    if (!user) {
-      return { threads: [], nextCursor: null, hasMore: false };
-    }
-
-    const limit = args.limit ?? 25;
-
-    // Get all messages sent by the user (isIncoming: false)
-    const sentMessages = await ctx.db
-      .query("messages")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .collect();
-
-    // Filter to only outgoing messages and get unique thread IDs
-    const sentThreadIds = [
-      ...new Set(
-        sentMessages
-          .filter((m) => !m.isIncoming)
-          .map((m) => m.threadId)
-      ),
-    ];
-
-    // Get the threads
-    const threads = await Promise.all(
-      sentThreadIds.map((id) => ctx.db.get(id))
-    );
-
-    // Filter out nulls, trashed, and sort by lastMessageAt
-    let validThreads = threads
-      .filter((t): t is NonNullable<typeof t> => t !== null && !t.isTrashed)
-      .sort((a, b) => b.lastMessageAt - a.lastMessageAt);
-
-    // Apply cursor
-    if (args.cursor) {
-      validThreads = validThreads.filter((t) => t.lastMessageAt < args.cursor!);
-    }
-
-    // Paginate
-    const hasMore = validThreads.length > limit;
-    const paginatedThreads = validThreads.slice(0, limit);
-    const nextCursor =
-      hasMore && paginatedThreads.length > 0
-        ? paginatedThreads[paginatedThreads.length - 1].lastMessageAt
-        : null;
-
-    return {
-      threads: paginatedThreads,
-      nextCursor,
-      hasMore,
-    };
   },
 });
 

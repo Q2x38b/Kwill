@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { useMutation } from "convex/react";
+import { useNavigate } from "react-router-dom";
+import { useMutation, useAction } from "convex/react";
 import {
   X,
   Send,
@@ -19,7 +19,6 @@ import { ContactsInput } from "@/components/email/ContactsInput";
 
 export function ComposeScreen() {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
   const [showCcBcc, setShowCcBcc] = useState(false);
   const [isSending, setIsSending] = useState(false);
 
@@ -40,10 +39,10 @@ export function ComposeScreen() {
   }>({});
 
   const saveDraft = useMutation(api.emails.mutations.saveDraft);
+  const sendEmail = useAction(api.emails.actions.sendEmail);
 
-  // Get replyTo from URL params (for future reply functionality)
-  const replyToThreadId = searchParams.get("replyTo");
-  console.log("Reply to thread:", replyToThreadId);
+  // Error state for send failures
+  const [sendError, setSendError] = useState<string | null>(null);
 
   const isDirty = to.length > 0 || subject || body;
 
@@ -78,17 +77,24 @@ export function ComposeScreen() {
     if (!validate()) return;
 
     setIsSending(true);
+    setSendError(null);
     try {
-      await saveDraft({
+      const result = await sendEmail({
         to,
         cc: cc.length > 0 ? cc : undefined,
         bcc: bcc.length > 0 ? bcc : undefined,
         subject,
         body,
       });
-      navigate(-1);
+
+      if (result.success) {
+        navigate(-1);
+      } else {
+        setSendError(result.error || "Failed to send email");
+      }
     } catch (error) {
       console.error("Failed to send:", error);
+      setSendError(error instanceof Error ? error.message : "Failed to send email");
     } finally {
       setIsSending(false);
     }
@@ -267,6 +273,15 @@ export function ComposeScreen() {
               <p className="px-6 pb-2 text-xs text-[var(--destructive)]">
                 {errors.body}
               </p>
+            )}
+
+            {/* Send error display */}
+            {sendError && (
+              <div className="mx-6 mb-4 p-3 rounded-lg bg-[var(--destructive)]/10 border border-[var(--destructive)]/20">
+                <p className="text-sm text-[var(--destructive)]">
+                  {sendError}
+                </p>
+              </div>
             )}
 
             {/* Attachments Preview Area */}
