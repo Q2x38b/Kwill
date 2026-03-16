@@ -1,6 +1,5 @@
 "use node";
 
-import { v } from "convex/values";
 import { action } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { GmailThread, GmailListResponse } from "../lib/gmail_types";
@@ -14,6 +13,40 @@ import {
 } from "../lib/gmail_parser";
 
 const GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
+
+/**
+ * Get Google OAuth token from Clerk Backend API
+ */
+async function getGoogleOAuthToken(clerkUserId: string): Promise<string> {
+  const clerkSecretKey = process.env.CLERK_SECRET_KEY;
+  if (!clerkSecretKey) {
+    throw new Error("CLERK_SECRET_KEY environment variable not set");
+  }
+
+  // Get user's OAuth access tokens from Clerk
+  const response = await fetch(
+    `https://api.clerk.com/v1/users/${clerkUserId}/oauth_access_tokens/oauth_google`,
+    {
+      headers: {
+        Authorization: `Bearer ${clerkSecretKey}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`Failed to get OAuth token from Clerk: ${response.status} - ${error}`);
+  }
+
+  const tokens = await response.json();
+
+  if (!tokens || tokens.length === 0 || !tokens[0].token) {
+    throw new Error("No Google OAuth token found. Please reconnect your Google account.");
+  }
+
+  return tokens[0].token;
+}
 
 /**
  * Make an authenticated request to Gmail API
@@ -92,10 +125,8 @@ async function getGmailThread(
  * Full sync action - syncs inbox threads from Gmail
  */
 export const fullSync = action({
-  args: {
-    accessToken: v.string(),
-  },
-  handler: async (ctx, args) => {
+  args: {},
+  handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
       throw new Error("Not authenticated");
@@ -118,12 +149,15 @@ export const fullSync = action({
     });
 
     try {
+      // Get Google OAuth token from Clerk
+      const accessToken = await getGoogleOAuthToken(identity.subject);
+
       // Get user's email from Gmail profile
-      const profile = await getGmailProfile(args.accessToken);
+      const profile = await getGmailProfile(accessToken);
       const userEmail = profile.email;
 
       // List threads from inbox
-      const threadList = await listGmailThreads(args.accessToken, 50);
+      const threadList = await listGmailThreads(accessToken, 50);
 
       if (!threadList.threads || threadList.threads.length === 0) {
         // No threads found
@@ -148,7 +182,7 @@ export const fullSync = action({
       for (const threadRef of threadList.threads) {
         try {
           // Get full thread with messages
-          const fullThread = await getGmailThread(args.accessToken, threadRef.id);
+          const fullThread = await getGmailThread(accessToken, threadRef.id);
 
           if (!fullThread.messages || fullThread.messages.length === 0) {
             continue;

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useAction } from "convex/react";
-import { useSession } from "@clerk/react";
 import { motion } from "framer-motion";
 import { Inbox, Loader2, RefreshCw } from "lucide-react";
 import { api } from "../../convex/_generated/api";
@@ -13,7 +12,6 @@ import type { EmailCategory, EmailFilter } from "@/types/email";
 
 export function InboxScreen() {
   const navigate = useNavigate();
-  const { session } = useSession();
   const [filters, setFilters] = useState<EmailFilter>({});
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
@@ -39,38 +37,24 @@ export function InboxScreen() {
   };
 
   const handleSyncGmail = async () => {
-    if (!session) return;
-
     setIsSyncing(true);
     setSyncError(null);
 
     try {
-      // Get OAuth token from Clerk - requires "oauth_google" JWT template
-      // that includes the Google OAuth access token
-      const token = await session.getToken({ template: "oauth_google" });
-
-      if (!token) {
-        setSyncError(
-          "Gmail OAuth token not available. Create an 'oauth_google' JWT template in Clerk Dashboard with the Google access token."
-        );
-        return;
-      }
-
-      const result = await syncGmail({ accessToken: token });
+      // Action fetches OAuth token from Clerk's API directly
+      const result = await syncGmail({});
       console.log("Gmail sync result:", result);
     } catch (error) {
       console.error("Failed to sync Gmail:", error);
       const errorMessage = error instanceof Error ? error.message : "Failed to sync Gmail";
 
       // Provide more helpful error messages
-      if (errorMessage.includes("template") || errorMessage.includes("JWT")) {
-        setSyncError(
-          "JWT template 'oauth_google' not found. Please create it in Clerk Dashboard > JWT Templates."
-        );
+      if (errorMessage.includes("CLERK_SECRET_KEY")) {
+        setSyncError("Server configuration error. CLERK_SECRET_KEY not set.");
+      } else if (errorMessage.includes("No Google OAuth token")) {
+        setSyncError("No Gmail access. Please sign out and sign in again with Google.");
       } else if (errorMessage.includes("401") || errorMessage.includes("403")) {
-        setSyncError(
-          "Gmail access denied. Ensure your Google account has Gmail API access enabled."
-        );
+        setSyncError("Gmail access denied. Your Google token may have expired.");
       } else {
         setSyncError(errorMessage);
       }
