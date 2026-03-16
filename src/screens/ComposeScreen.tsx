@@ -31,7 +31,9 @@ export function ComposeScreen() {
 
   const saveDraft = useMutation(api.emails.mutations.saveDraft);
 
-  const _replyTo = searchParams.get("replyTo");
+  // Get replyTo from URL params (for future reply functionality)
+  const replyToThreadId = searchParams.get("replyTo");
+  console.log("Reply to thread:", replyToThreadId); // Will be used for reply feature
 
   const {
     register,
