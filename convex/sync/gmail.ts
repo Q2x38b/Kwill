@@ -1321,37 +1321,48 @@ export const renewExpiringWatches = internalAction({
 export const autoSetup = action({
   args: {},
   handler: async (ctx): Promise<{ success: boolean; message: string; alreadySetUp?: boolean }> => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      return { success: false, message: "Not authenticated" };
-    }
-
-    // Get user from database
-    const user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
-      clerkId: identity.subject,
-    });
-
-    if (!user) {
-      return { success: false, message: "User not found" };
-    }
-
-    // Check if already set up
-    if (user.gmailConnected) {
-      return { success: true, message: "Gmail already connected", alreadySetUp: true };
-    }
-
-    // Try to get Google OAuth token - if this fails, user didn't sign in with Google
     try {
-      await getGoogleOAuthToken(identity.subject);
-    } catch {
-      // User doesn't have Google OAuth token - they didn't sign in with Google
-      return { success: false, message: "No Google OAuth token found - user may not have signed in with Google" };
-    }
+      const identity = await ctx.auth.getUserIdentity();
+      if (!identity) {
+        return { success: false, message: "Not authenticated" };
+      }
 
-    // User has Google OAuth, trigger full sync which sets up everything
-    console.log(`Auto-setting up Gmail for user ${user.email}`);
+      // Retry logic - user might not be visible immediately after creation
+      let user = null;
+      let retries = 3;
+      while (!user && retries > 0) {
+        user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
+          clerkId: identity.subject,
+        });
+        if (!user && retries > 1) {
+          // Wait a bit for eventual consistency
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        retries--;
+      }
 
-    try {
+      if (!user) {
+        return { success: false, message: "User not found after retries" };
+      }
+
+      // Check if already set up
+      if (user.gmailConnected) {
+        return { success: true, message: "Gmail already connected", alreadySetUp: true };
+      }
+
+      // Try to get Google OAuth token - if this fails, user didn't sign in with Google
+      try {
+        await getGoogleOAuthToken(identity.subject);
+      } catch (oauthError) {
+        // User doesn't have Google OAuth token - they didn't sign in with Google
+        const oauthMsg = oauthError instanceof Error ? oauthError.message : "Unknown OAuth error";
+        console.log(`No Google OAuth token for ${user.email}: ${oauthMsg}`);
+        return { success: false, message: "No Google OAuth token - user may not have signed in with Google" };
+      }
+
+      // User has Google OAuth, trigger full sync which sets up everything
+      console.log(`Auto-setting up Gmail for user ${user.email}`);
+
       const result = await ctx.runAction(internal.sync.gmail.fullSyncInternal, {
         clerkUserId: identity.subject,
       });
@@ -1362,7 +1373,8 @@ export const autoSetup = action({
       };
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : "Unknown error";
-      console.error(`Auto-setup failed for ${user.email}:`, errorMsg);
+      console.error(`Auto-setup failed:`, errorMsg);
+      // Return gracefully instead of throwing
       return { success: false, message: errorMsg };
     }
   },
