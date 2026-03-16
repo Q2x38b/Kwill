@@ -1,6 +1,9 @@
 "use node";
 
 declare const process: { env: Record<string, string | undefined> };
+declare const Buffer: {
+  from(str: string, encoding?: string): { toString(encoding: string): string };
+};
 
 import { v } from "convex/values";
 import { action } from "../_generated/server";

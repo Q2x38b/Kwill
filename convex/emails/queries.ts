@@ -423,6 +423,8 @@ export const searchContacts = query({
       emailCount: 0,
       isFavorite: false,
       userId: user._id,
+      googleResourceName: undefined as string | undefined,
+      avatarUrl: undefined as string | undefined,
     }));
 
     // Combine and limit results
