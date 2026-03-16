@@ -220,3 +220,162 @@ export const getUnreadCount = query({
     ).length;
   },
 });
+
+// List sent emails - threads where user sent at least one message
+export const listSentThreads = query({
+  args: {
+    limit: v.optional(v.number()),
+    cursor: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return { threads: [], nextCursor: null, hasMore: false };
+    }
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerk_id", (q) =>
+        q.eq("clerkId", identity.subject)
+      )
+      .first();
+
+    if (!user) {
+      return { threads: [], nextCursor: null, hasMore: false };
+    }
+
+    const limit = args.limit ?? 25;
+
+    // Get all messages sent by the user (isIncoming: false)
+    const sentMessages = await ctx.db
+      .query("messages")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect();
+
+    // Filter to only outgoing messages and get unique thread IDs
+    const sentThreadIds = [
+      ...new Set(
+        sentMessages
+          .filter((m) => !m.isIncoming)
+          .map((m) => m.threadId)
+      ),
+    ];
+
+    // Get the threads
+    const threads = await Promise.all(
+      sentThreadIds.map((id) => ctx.db.get(id))
+    );
+
+    // Filter out nulls, trashed, and sort by lastMessageAt
+    let validThreads = threads
+      .filter((t): t is NonNullable<typeof t> => t !== null && !t.isTrashed)
+      .sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+
+    // Apply cursor
+    if (args.cursor) {
+      validThreads = validThreads.filter((t) => t.lastMessageAt < args.cursor!);
+    }
+
+    // Paginate
+    const hasMore = validThreads.length > limit;
+    const paginatedThreads = validThreads.slice(0, limit);
+    const nextCursor =
+      hasMore && paginatedThreads.length > 0
+        ? paginatedThreads[paginatedThreads.length - 1].lastMessageAt
+        : null;
+
+    return {
+      threads: paginatedThreads,
+      nextCursor,
+      hasMore,
+    };
+  },
+});
+
+// List user's drafts
+export const listDrafts = query({
+  args: {
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return [];
+    }
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerk_id", (q) =>
+        q.eq("clerkId", identity.subject)
+      )
+      .first();
+
+    if (!user) {
+      return [];
+    }
+
+    const limit = args.limit ?? 50;
+
+    const drafts = await ctx.db
+      .query("drafts")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .take(limit);
+
+    return drafts;
+  },
+});
+
+// Search contacts by email or name for autocomplete
+export const searchContacts = query({
+  args: {
+    query: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return [];
+    }
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_clerk_id", (q) =>
+        q.eq("clerkId", identity.subject)
+      )
+      .first();
+
+    if (!user) {
+      return [];
+    }
+
+    const searchQuery = args.query.toLowerCase().trim();
+    if (!searchQuery) {
+      // Return top contacts by email count if no search query
+      const topContacts = await ctx.db
+        .query("contacts")
+        .withIndex("by_user_email_count", (q) => q.eq("userId", user._id))
+        .order("desc")
+        .take(args.limit ?? 10);
+      return topContacts;
+    }
+
+    // Get all user contacts and filter by search query
+    const contacts = await ctx.db
+      .query("contacts")
+      .withIndex("by_user", (q) => q.eq("userId", user._id))
+      .collect();
+
+    // Filter by email or name match
+    const matches = contacts
+      .filter((c) => {
+        const emailMatch = c.email.toLowerCase().includes(searchQuery);
+        const nameMatch = c.name?.toLowerCase().includes(searchQuery);
+        return emailMatch || nameMatch;
+      })
+      .sort((a, b) => b.emailCount - a.emailCount) // Sort by email frequency
+      .slice(0, args.limit ?? 10);
+
+    return matches;
+  },
+});

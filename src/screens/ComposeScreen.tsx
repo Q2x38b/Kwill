@@ -1,9 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation } from "convex/react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { X, Send, Paperclip, ChevronDown } from "lucide-react";
 import { motion } from "framer-motion";
 import { api } from "../../convex/_generated/api";
@@ -11,17 +8,8 @@ import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { ContactsInput } from "@/components/email/ContactsInput";
 import { cn } from "@/lib/utils";
-
-const composeSchema = z.object({
-  to: z.string().min(1, "At least one recipient required"),
-  cc: z.string().optional(),
-  bcc: z.string().optional(),
-  subject: z.string().min(1, "Subject is required"),
-  body: z.string().min(1, "Message body is required"),
-});
-
-type ComposeForm = z.infer<typeof composeSchema>;
 
 export function ComposeScreen() {
   const navigate = useNavigate();
@@ -29,38 +17,57 @@ export function ComposeScreen() {
   const [showCcBcc, setShowCcBcc] = useState(false);
   const [isSending, setIsSending] = useState(false);
 
+  // Recipient state
+  const [to, setTo] = useState<string[]>([]);
+  const [cc, setCc] = useState<string[]>([]);
+  const [bcc, setBcc] = useState<string[]>([]);
+
+  // Form state
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+
+  // Validation errors
+  const [errors, setErrors] = useState<{
+    to?: string;
+    subject?: string;
+    body?: string;
+  }>({});
+
   const saveDraft = useMutation(api.emails.mutations.saveDraft);
 
   // Get replyTo from URL params (for future reply functionality)
   const replyToThreadId = searchParams.get("replyTo");
-  console.log("Reply to thread:", replyToThreadId); // Will be used for reply feature
+  console.log("Reply to thread:", replyToThreadId);
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isDirty },
-    watch,
-  } = useForm<ComposeForm>({
-    resolver: zodResolver(composeSchema),
-    defaultValues: {
-      to: "",
-      cc: "",
-      bcc: "",
-      subject: "",
-      body: "",
-    },
-  });
+  const isDirty = to.length > 0 || subject || body;
 
-  const onSubmit = async (data: ComposeForm) => {
+  const validate = () => {
+    const newErrors: typeof errors = {};
+    if (to.length === 0) {
+      newErrors.to = "At least one recipient required";
+    }
+    if (!subject.trim()) {
+      newErrors.subject = "Subject is required";
+    }
+    if (!body.trim()) {
+      newErrors.body = "Message body is required";
+    }
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validate()) return;
+
     setIsSending(true);
     try {
-      // For now, save as draft (Gmail send will be implemented with API)
       await saveDraft({
-        to: data.to.split(",").map((e) => e.trim()),
-        cc: data.cc ? data.cc.split(",").map((e) => e.trim()) : undefined,
-        bcc: data.bcc ? data.bcc.split(",").map((e) => e.trim()) : undefined,
-        subject: data.subject,
-        body: data.body,
+        to,
+        cc: cc.length > 0 ? cc : undefined,
+        bcc: bcc.length > 0 ? bcc : undefined,
+        subject,
+        body,
       });
       navigate(-1);
     } catch (error) {
@@ -72,12 +79,10 @@ export function ComposeScreen() {
 
   const handleClose = () => {
     if (isDirty) {
-      // Save draft before closing
-      const values = watch();
       saveDraft({
-        to: values.to ? values.to.split(",").map((e) => e.trim()) : [],
-        subject: values.subject || "(No Subject)",
-        body: values.body || "",
+        to: to.length > 0 ? to : [],
+        subject: subject || "(No Subject)",
+        body: body || "",
       });
     }
     navigate(-1);
@@ -87,28 +92,27 @@ export function ComposeScreen() {
     <div className="flex flex-col h-full">
       <Header showBack title="New Message">
         <div className="flex items-center gap-2 ml-auto">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={handleClose}
-          >
+          <Button variant="ghost" size="icon-sm" onClick={handleClose}>
             <X className="h-5 w-5" />
           </Button>
         </div>
       </Header>
 
       <form
-        onSubmit={handleSubmit(onSubmit)}
+        onSubmit={onSubmit}
         className="flex-1 flex flex-col overflow-hidden bg-[var(--card)]"
       >
         {/* Recipients */}
         <div className="border-b border-[var(--border)]">
           <div className="flex items-center px-4 py-3 gap-2">
-            <span className="text-sm text-[var(--muted-foreground)] w-12">To:</span>
-            <Input
-              {...register("to")}
+            <span className="text-sm text-[var(--muted-foreground)] w-12 shrink-0">
+              To:
+            </span>
+            <ContactsInput
+              value={to}
+              onChange={setTo}
               placeholder="Recipients"
-              className="border-0 focus-visible:ring-0 px-0 text-[var(--foreground)] bg-transparent"
+              className="flex-1"
             />
             <Button
               type="button"
@@ -127,7 +131,7 @@ export function ComposeScreen() {
           </div>
           {errors.to && (
             <p className="px-4 pb-2 text-xs text-[var(--destructive)]">
-              {errors.to.message}
+              {errors.to}
             </p>
           )}
 
@@ -138,19 +142,25 @@ export function ComposeScreen() {
               exit={{ height: 0, opacity: 0 }}
             >
               <div className="flex items-center px-4 py-3 gap-2 border-t border-[var(--border)]">
-                <span className="text-sm text-[var(--muted-foreground)] w-12">Cc:</span>
-                <Input
-                  {...register("cc")}
+                <span className="text-sm text-[var(--muted-foreground)] w-12 shrink-0">
+                  Cc:
+                </span>
+                <ContactsInput
+                  value={cc}
+                  onChange={setCc}
                   placeholder="Cc recipients"
-                  className="border-0 focus-visible:ring-0 px-0 text-[var(--foreground)] bg-transparent"
+                  className="flex-1"
                 />
               </div>
               <div className="flex items-center px-4 py-3 gap-2 border-t border-[var(--border)]">
-                <span className="text-sm text-[var(--muted-foreground)] w-12">Bcc:</span>
-                <Input
-                  {...register("bcc")}
+                <span className="text-sm text-[var(--muted-foreground)] w-12 shrink-0">
+                  Bcc:
+                </span>
+                <ContactsInput
+                  value={bcc}
+                  onChange={setBcc}
                   placeholder="Bcc recipients"
-                  className="border-0 focus-visible:ring-0 px-0 text-[var(--foreground)] bg-transparent"
+                  className="flex-1"
                 />
               </div>
             </motion.div>
@@ -160,21 +170,23 @@ export function ComposeScreen() {
         {/* Subject */}
         <div className="flex items-center px-4 py-3 gap-2 border-b border-[var(--border)]">
           <Input
-            {...register("subject")}
+            value={subject}
+            onChange={(e) => setSubject(e.target.value)}
             placeholder="Subject"
             className="border-0 focus-visible:ring-0 px-0 text-base font-medium text-[var(--foreground)] bg-transparent"
           />
         </div>
         {errors.subject && (
           <p className="px-4 py-1 text-xs text-[var(--destructive)]">
-            {errors.subject.message}
+            {errors.subject}
           </p>
         )}
 
         {/* Body */}
         <div className="flex-1 p-4 overflow-auto">
           <Textarea
-            {...register("body")}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
             placeholder="Write your message..."
             className="border-0 focus-visible:ring-0 min-h-full resize-none p-0 text-[var(--foreground)] bg-transparent"
           />
@@ -186,11 +198,7 @@ export function ComposeScreen() {
             <Paperclip className="h-5 w-5" />
           </Button>
 
-          <Button
-            type="submit"
-            disabled={isSending}
-            className="gap-2"
-          >
+          <Button type="submit" disabled={isSending} className="gap-2">
             <Send className="h-4 w-4" />
             Send
           </Button>

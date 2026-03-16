@@ -10,6 +10,8 @@ import { SettingsScreen } from "@/screens/SettingsScreen";
 import { StarredScreen } from "@/screens/StarredScreen";
 import { ArchiveScreen } from "@/screens/ArchiveScreen";
 import { TrashScreen } from "@/screens/TrashScreen";
+import { SentScreen } from "@/screens/SentScreen";
+import { DraftsScreen } from "@/screens/DraftsScreen";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isSignedIn, isLoaded } = useAuth();
@@ -52,8 +54,8 @@ export default function App() {
           <Route path="starred" element={<StarredScreen />} />
           <Route path="archive" element={<ArchiveScreen />} />
           <Route path="trash" element={<TrashScreen />} />
-          <Route path="sent" element={<InboxScreen />} />
-          <Route path="drafts" element={<InboxScreen />} />
+          <Route path="sent" element={<SentScreen />} />
+          <Route path="drafts" element={<DraftsScreen />} />
         </Route>
 
         {/* Fallback */}

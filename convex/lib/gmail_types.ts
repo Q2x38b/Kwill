@@ -109,5 +109,8 @@ export function mapGmailCategoryToApp(
   if (labels.includes(GMAIL_CATEGORIES.PROMOTIONS)) return "promotions";
   if (labels.includes(GMAIL_CATEGORIES.UPDATES)) return "updates";
   if (labels.includes(GMAIL_CATEGORIES.PRIMARY)) return "primary";
+  // Gmail doesn't always add CATEGORY_PERSONAL for primary emails
+  // If email is in INBOX without any category label, it's primary
+  if (labels.includes("INBOX")) return "primary";
   return undefined;
 }

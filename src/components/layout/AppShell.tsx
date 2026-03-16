@@ -1,9 +1,6 @@
 import { useState } from "react";
 import { Outlet, useNavigate } from "react-router-dom";
 import { useQuery, useMutation } from "convex/react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { z } from "zod";
 import { Send, Paperclip, X, ChevronDown } from "lucide-react";
 import { motion } from "framer-motion";
 import { api } from "../../../convex/_generated/api";
@@ -13,18 +10,9 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { ContactsInput } from "@/components/email/ContactsInput";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
-
-const composeSchema = z.object({
-  to: z.string().min(1, "At least one recipient required"),
-  cc: z.string().optional(),
-  bcc: z.string().optional(),
-  subject: z.string().min(1, "Subject is required"),
-  body: z.string().min(1, "Message body is required"),
-});
-
-type ComposeForm = z.infer<typeof composeSchema>;
 
 export function AppShell() {
   const navigate = useNavigate();
@@ -33,24 +21,24 @@ export function AppShell() {
   const [showCcBcc, setShowCcBcc] = useState(false);
   const [isSending, setIsSending] = useState(false);
 
+  // Recipient state
+  const [to, setTo] = useState<string[]>([]);
+  const [cc, setCc] = useState<string[]>([]);
+  const [bcc, setBcc] = useState<string[]>([]);
+
+  // Form state
+  const [subject, setSubject] = useState("");
+  const [body, setBody] = useState("");
+
+  // Validation errors
+  const [errors, setErrors] = useState<{
+    to?: string;
+    subject?: string;
+    body?: string;
+  }>({});
+
   const unreadCount = useQuery(api.emails.queries.getUnreadCount) ?? 0;
   const saveDraft = useMutation(api.emails.mutations.saveDraft);
-
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    reset,
-  } = useForm<ComposeForm>({
-    resolver: zodResolver(composeSchema),
-    defaultValues: {
-      to: "",
-      cc: "",
-      bcc: "",
-      subject: "",
-      body: "",
-    },
-  });
 
   const handleCompose = () => {
     if (isMobile) {
@@ -60,17 +48,45 @@ export function AppShell() {
     }
   };
 
-  const onSubmit = async (data: ComposeForm) => {
+  const resetForm = () => {
+    setTo([]);
+    setCc([]);
+    setBcc([]);
+    setSubject("");
+    setBody("");
+    setErrors({});
+    setShowCcBcc(false);
+  };
+
+  const validate = () => {
+    const newErrors: typeof errors = {};
+    if (to.length === 0) {
+      newErrors.to = "At least one recipient required";
+    }
+    if (!subject.trim()) {
+      newErrors.subject = "Subject is required";
+    }
+    if (!body.trim()) {
+      newErrors.body = "Message body is required";
+    }
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validate()) return;
+
     setIsSending(true);
     try {
       await saveDraft({
-        to: data.to.split(",").map((e) => e.trim()),
-        cc: data.cc ? data.cc.split(",").map((e) => e.trim()) : undefined,
-        bcc: data.bcc ? data.bcc.split(",").map((e) => e.trim()) : undefined,
-        subject: data.subject,
-        body: data.body,
+        to,
+        cc: cc.length > 0 ? cc : undefined,
+        bcc: bcc.length > 0 ? bcc : undefined,
+        subject,
+        body,
       });
-      reset();
+      resetForm();
       setComposeOpen(false);
     } catch (error) {
       console.error("Failed to send:", error);
@@ -80,8 +96,7 @@ export function AppShell() {
   };
 
   const handleCloseCompose = () => {
-    reset();
-    setShowCcBcc(false);
+    resetForm();
     setComposeOpen(false);
   };
 
@@ -101,25 +116,40 @@ export function AppShell() {
       {/* Desktop compose modal */}
       {!isMobile && (
         <Sheet open={composeOpen} onOpenChange={setComposeOpen}>
-          <SheetContent side="right" size="lg" showHandle={false} className="p-0 flex flex-col">
+          <SheetContent
+            side="right"
+            size="lg"
+            showHandle={false}
+            className="p-0 flex flex-col"
+          >
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border)]">
               <h2 className="text-lg font-semibold">New Message</h2>
-              <Button variant="ghost" size="icon-sm" onClick={handleCloseCompose}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={handleCloseCompose}
+              >
                 <X className="h-5 w-5" />
               </Button>
             </div>
 
             {/* Form */}
-            <form onSubmit={handleSubmit(onSubmit)} className="flex-1 flex flex-col overflow-hidden">
+            <form
+              onSubmit={onSubmit}
+              className="flex-1 flex flex-col overflow-hidden"
+            >
               {/* Recipients */}
               <div className="border-b border-[var(--border)]">
                 <div className="flex items-center px-4 py-3 gap-2">
-                  <span className="text-sm text-[var(--muted-foreground)] w-12">To:</span>
-                  <Input
-                    {...register("to")}
+                  <span className="text-sm text-[var(--muted-foreground)] w-12 shrink-0">
+                    To:
+                  </span>
+                  <ContactsInput
+                    value={to}
+                    onChange={setTo}
                     placeholder="Recipients"
-                    className="border-0 focus-visible:ring-0 px-0 bg-transparent"
+                    className="flex-1"
                   />
                   <Button
                     type="button"
@@ -128,11 +158,18 @@ export function AppShell() {
                     onClick={() => setShowCcBcc(!showCcBcc)}
                     className="shrink-0 text-[var(--muted-foreground)]"
                   >
-                    <ChevronDown className={cn("h-4 w-4 transition-transform", showCcBcc && "rotate-180")} />
+                    <ChevronDown
+                      className={cn(
+                        "h-4 w-4 transition-transform",
+                        showCcBcc && "rotate-180"
+                      )}
+                    />
                   </Button>
                 </div>
                 {errors.to && (
-                  <p className="px-4 pb-2 text-xs text-[var(--destructive)]">{errors.to.message}</p>
+                  <p className="px-4 pb-2 text-xs text-[var(--destructive)]">
+                    {errors.to}
+                  </p>
                 )}
 
                 {showCcBcc && (
@@ -142,19 +179,25 @@ export function AppShell() {
                     exit={{ height: 0, opacity: 0 }}
                   >
                     <div className="flex items-center px-4 py-3 gap-2 border-t border-[var(--border)]">
-                      <span className="text-sm text-[var(--muted-foreground)] w-12">Cc:</span>
-                      <Input
-                        {...register("cc")}
+                      <span className="text-sm text-[var(--muted-foreground)] w-12 shrink-0">
+                        Cc:
+                      </span>
+                      <ContactsInput
+                        value={cc}
+                        onChange={setCc}
                         placeholder="Cc recipients"
-                        className="border-0 focus-visible:ring-0 px-0 bg-transparent"
+                        className="flex-1"
                       />
                     </div>
                     <div className="flex items-center px-4 py-3 gap-2 border-t border-[var(--border)]">
-                      <span className="text-sm text-[var(--muted-foreground)] w-12">Bcc:</span>
-                      <Input
-                        {...register("bcc")}
+                      <span className="text-sm text-[var(--muted-foreground)] w-12 shrink-0">
+                        Bcc:
+                      </span>
+                      <ContactsInput
+                        value={bcc}
+                        onChange={setBcc}
                         placeholder="Bcc recipients"
-                        className="border-0 focus-visible:ring-0 px-0 bg-transparent"
+                        className="flex-1"
                       />
                     </div>
                   </motion.div>
@@ -164,19 +207,23 @@ export function AppShell() {
               {/* Subject */}
               <div className="flex items-center px-4 py-3 gap-2 border-b border-[var(--border)]">
                 <Input
-                  {...register("subject")}
+                  value={subject}
+                  onChange={(e) => setSubject(e.target.value)}
                   placeholder="Subject"
                   className="border-0 focus-visible:ring-0 px-0 text-base font-medium bg-transparent"
                 />
               </div>
               {errors.subject && (
-                <p className="px-4 py-1 text-xs text-[var(--destructive)]">{errors.subject.message}</p>
+                <p className="px-4 py-1 text-xs text-[var(--destructive)]">
+                  {errors.subject}
+                </p>
               )}
 
               {/* Body */}
               <div className="flex-1 p-4 overflow-auto">
                 <Textarea
-                  {...register("body")}
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
                   placeholder="Write your message..."
                   className="border-0 focus-visible:ring-0 min-h-full resize-none p-0 bg-transparent"
                 />
