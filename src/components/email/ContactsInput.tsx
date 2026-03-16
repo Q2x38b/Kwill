@@ -47,33 +47,6 @@ function getAvatarGradient(str: string): { bg: string; dots: string } {
   return gradients[Math.abs(hash) % gradients.length];
 }
 
-// Generate a consistent color from a string (for fallback)
-function getAvatarColor(str: string): string {
-  const colors = [
-    "bg-rose-500",
-    "bg-pink-500",
-    "bg-fuchsia-500",
-    "bg-purple-500",
-    "bg-violet-500",
-    "bg-indigo-500",
-    "bg-blue-500",
-    "bg-sky-500",
-    "bg-cyan-500",
-    "bg-teal-500",
-    "bg-emerald-500",
-    "bg-green-500",
-    "bg-lime-500",
-    "bg-yellow-500",
-    "bg-amber-500",
-    "bg-orange-500",
-  ];
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  return colors[Math.abs(hash) % colors.length];
-}
-
 // Disco ball style avatar component
 function DiscoBallAvatar({ email, size = "md" }: { email: string; size?: "sm" | "md" }) {
   const gradient = getAvatarGradient(email);
@@ -236,19 +209,6 @@ export function ContactsInput({
   const getChipDisplay = (email: string) => {
     const details = contactDetails.get(email);
     return details?.name || email;
-  };
-
-  // Get initials for avatar
-  const getInitials = (email: string) => {
-    const details = contactDetails.get(email);
-    if (details?.name) {
-      const parts = details.name.split(" ");
-      if (parts.length >= 2) {
-        return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-      }
-      return details.name[0].toUpperCase();
-    }
-    return email[0].toUpperCase();
   };
 
   return (
