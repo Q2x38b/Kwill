@@ -1,6 +1,6 @@
 import { useRef, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "convex/react";
+import { useQuery, useAction } from "convex/react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Archive,
@@ -11,6 +11,7 @@ import {
   MoreHorizontal,
   X,
   Sparkles,
+  Loader2,
 } from "lucide-react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -30,11 +31,24 @@ export function EmailThread({ threadId, thread }: EmailThreadProps) {
   const navigate = useNavigate();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showComposer, setShowComposer] = useState(false);
+  const [isLoadingContent, setIsLoadingContent] = useState(false);
   // Force re-render every minute to update relative timestamps
   const [, setTick] = useState(0);
 
   const messages = (useQuery(api.emails.queries.getMessages, { threadId }) ?? []) as Message[];
   const { archive, moveToTrash, toggleStar, markAsRead } = useEmailActions();
+  const fetchThreadContent = useAction(api.emails.actions.fetchThreadContent);
+
+  // Fetch message content if not cached
+  useEffect(() => {
+    const needsContent = messages.some((m) => !m.bodyFetchedAt && !m.bodyHtml && !m.bodyPlain);
+    if (needsContent && messages.length > 0 && !isLoadingContent) {
+      setIsLoadingContent(true);
+      fetchThreadContent({ threadId })
+        .catch((err) => console.error("Failed to fetch thread content:", err))
+        .finally(() => setIsLoadingContent(false));
+    }
+  }, [threadId, messages, fetchThreadContent, isLoadingContent]);
 
   // Mark thread as read when viewed
   useEffect(() => {
@@ -75,6 +89,14 @@ export function EmailThread({ threadId, thread }: EmailThreadProps) {
 
   return (
     <div className="flex flex-col h-full bg-[var(--background)]">
+      {/* Loading indicator when fetching email content */}
+      {isLoadingContent && (
+        <div className="flex items-center justify-center gap-2 py-2 bg-[var(--accent)] text-sm text-[var(--muted-foreground)]">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading email content...
+        </div>
+      )}
+
       {/* Messages area */}
       <div ref={scrollRef} className="flex-1 overflow-auto">
         <div className="max-w-3xl mx-auto p-4 md:p-6 space-y-6">

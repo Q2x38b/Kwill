@@ -58,3 +58,21 @@ export const markAsRead = internalMutation({
     await ctx.db.patch(args.threadId, { isRead: args.isRead });
   },
 });
+
+/**
+ * Cache fetched message body content
+ */
+export const cacheMessageBody = internalMutation({
+  args: {
+    messageId: v.id("messages"),
+    bodyPlain: v.optional(v.string()),
+    bodyHtml: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.messageId, {
+      bodyPlain: args.bodyPlain,
+      bodyHtml: args.bodyHtml,
+      bodyFetchedAt: Date.now(),
+    });
+  },
+});

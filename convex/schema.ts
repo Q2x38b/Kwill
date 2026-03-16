@@ -65,7 +65,7 @@ export default defineSchema({
     .index("by_user_archived", ["userId", "isArchived"])
     .index("by_user_last_message", ["userId", "lastMessageAt"]),
 
-  // Individual email messages
+  // Individual email messages (body content fetched on-demand)
   messages: defineTable({
     userId: v.id("users"),
     threadId: v.id("threads"),
@@ -97,8 +97,10 @@ export default defineSchema({
       )
     ),
     subject: v.string(),
+    // Body content is fetched on-demand and cached
     bodyPlain: v.optional(v.string()),
     bodyHtml: v.optional(v.string()),
+    bodyFetchedAt: v.optional(v.number()), // When body was last fetched
     snippet: v.string(),
     sentAt: v.number(),
     receivedAt: v.number(),

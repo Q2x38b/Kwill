@@ -340,3 +340,206 @@ export const markAsRead = action({
     return { success: true };
   },
 });
+
+/**
+ * Fetch message content from Gmail (on-demand loading)
+ * This fetches the full body content and caches it in the database
+ */
+export const fetchMessageContent = action({
+  args: {
+    messageId: v.id("messages"),
+  },
+  handler: async (ctx, args): Promise<{ success: boolean; bodyPlain?: string; bodyHtml?: string }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not authenticated");
+    }
+
+    // Get message from database
+    const message = await ctx.runQuery(internal.emails.internalQueries.getMessageById, {
+      messageId: args.messageId,
+    });
+
+    if (!message) {
+      throw new Error("Message not found");
+    }
+
+    // If body is already fetched and cached, return it
+    if (message.bodyFetchedAt && (message.bodyPlain || message.bodyHtml)) {
+      return {
+        success: true,
+        bodyPlain: message.bodyPlain,
+        bodyHtml: message.bodyHtml,
+      };
+    }
+
+    try {
+      const accessToken = await getGoogleOAuthToken(identity.subject);
+
+      // Fetch message from Gmail
+      const response = await gmailFetch(
+        `/messages/${message.gmailMessageId}?format=full`,
+        accessToken
+      );
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Failed to fetch message: ${response.status} - ${error}`);
+      }
+
+      const gmailMessage = await response.json();
+
+      // Parse the message body
+      const { bodyPlain, bodyHtml } = parseMessageBody(gmailMessage);
+
+      // Cache the body in the database
+      await ctx.runMutation(internal.emails.internalMutations.cacheMessageBody, {
+        messageId: args.messageId,
+        bodyPlain,
+        bodyHtml,
+      });
+
+      return {
+        success: true,
+        bodyPlain,
+        bodyHtml,
+      };
+    } catch (err) {
+      console.error("Failed to fetch message content:", err);
+      throw err;
+    }
+  },
+});
+
+/**
+ * Fetch all message contents for a thread
+ */
+export const fetchThreadContent = action({
+  args: {
+    threadId: v.id("threads"),
+  },
+  handler: async (ctx, args): Promise<{ success: boolean; fetchedCount: number }> => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error("Not authenticated");
+    }
+
+    // Get thread from database
+    const thread = await ctx.runQuery(internal.emails.internalQueries.getThreadById, {
+      threadId: args.threadId,
+    });
+
+    if (!thread) {
+      throw new Error("Thread not found");
+    }
+
+    // Get messages that need body content
+    const messages = await ctx.runQuery(internal.emails.internalQueries.getMessagesNeedingContent, {
+      threadId: args.threadId,
+    });
+
+    if (messages.length === 0) {
+      return { success: true, fetchedCount: 0 };
+    }
+
+    try {
+      const accessToken = await getGoogleOAuthToken(identity.subject);
+
+      // Fetch full thread from Gmail (more efficient than individual messages)
+      const response = await gmailFetch(
+        `/threads/${thread.gmailThreadId}?format=full`,
+        accessToken
+      );
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Failed to fetch thread: ${response.status} - ${error}`);
+      }
+
+      const gmailThread = await response.json();
+      let fetchedCount = 0;
+
+      // Match Gmail messages to our database messages and cache bodies
+      for (const gmailMsg of gmailThread.messages || []) {
+        const localMsg = messages.find((m) => m.gmailMessageId === gmailMsg.id);
+        if (localMsg) {
+          const { bodyPlain, bodyHtml } = parseMessageBody(gmailMsg);
+
+          await ctx.runMutation(internal.emails.internalMutations.cacheMessageBody, {
+            messageId: localMsg._id,
+            bodyPlain,
+            bodyHtml,
+          });
+
+          fetchedCount++;
+        }
+      }
+
+      return { success: true, fetchedCount };
+    } catch (err) {
+      console.error("Failed to fetch thread content:", err);
+      throw err;
+    }
+  },
+});
+
+/**
+ * Parse message body from Gmail API response
+ */
+function parseMessageBody(gmailMessage: {
+  payload?: {
+    mimeType?: string;
+    body?: { data?: string };
+    parts?: Array<{
+      mimeType?: string;
+      body?: { data?: string };
+      parts?: Array<{
+        mimeType?: string;
+        body?: { data?: string };
+      }>;
+    }>;
+  };
+}): { bodyPlain?: string; bodyHtml?: string } {
+  let bodyPlain: string | undefined;
+  let bodyHtml: string | undefined;
+
+  const payload = gmailMessage.payload;
+  if (!payload) return { bodyPlain, bodyHtml };
+
+  // Helper to decode base64url
+  const decodeBase64 = (data: string): string => {
+    const base64 = data.replace(/-/g, "+").replace(/_/g, "/");
+    return decodeURIComponent(
+      atob(base64)
+        .split("")
+        .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
+        .join("")
+    );
+  };
+
+  // Helper to extract body from parts
+  const extractFromParts = (parts: typeof payload.parts): void => {
+    if (!parts) return;
+
+    for (const part of parts) {
+      if (part.mimeType === "text/plain" && part.body?.data && !bodyPlain) {
+        bodyPlain = decodeBase64(part.body.data);
+      } else if (part.mimeType === "text/html" && part.body?.data && !bodyHtml) {
+        bodyHtml = decodeBase64(part.body.data);
+      } else if (part.parts) {
+        extractFromParts(part.parts);
+      }
+    }
+  };
+
+  // Check if body is directly in payload
+  if (payload.mimeType === "text/plain" && payload.body?.data) {
+    bodyPlain = decodeBase64(payload.body.data);
+  } else if (payload.mimeType === "text/html" && payload.body?.data) {
+    bodyHtml = decodeBase64(payload.body.data);
+  } else if (payload.parts) {
+    extractFromParts(payload.parts);
+  }
+
+  return { bodyPlain, bodyHtml };
+}

@@ -247,8 +247,7 @@ export const fullSync = action({
               cc: parsed.cc,
               bcc: parsed.bcc,
               subject: parsed.subject,
-              bodyPlain: parsed.bodyPlain,
-              bodyHtml: parsed.bodyHtml,
+              // Body content fetched on-demand to save storage
               snippet: parsed.snippet,
               sentAt: parsed.sentAt,
               receivedAt: parsed.receivedAt,
@@ -464,8 +463,7 @@ export const incrementalSync = action({
               cc: parsed.cc,
               bcc: parsed.bcc,
               subject: parsed.subject,
-              bodyPlain: parsed.bodyPlain,
-              bodyHtml: parsed.bodyHtml,
+              // Body content fetched on-demand to save storage
               snippet: parsed.snippet,
               sentAt: parsed.sentAt,
               receivedAt: parsed.receivedAt,
@@ -665,8 +663,7 @@ export const fullSyncInternal = internalAction({
               cc: parsed.cc,
               bcc: parsed.bcc,
               subject: parsed.subject,
-              bodyPlain: parsed.bodyPlain,
-              bodyHtml: parsed.bodyHtml,
+              // Body content fetched on-demand to save storage
               snippet: parsed.snippet,
               sentAt: parsed.sentAt,
               receivedAt: parsed.receivedAt,
@@ -833,8 +830,7 @@ export const incrementalSyncInternal = internalAction({
               cc: parsed.cc,
               bcc: parsed.bcc,
               subject: parsed.subject,
-              bodyPlain: parsed.bodyPlain,
-              bodyHtml: parsed.bodyHtml,
+              // Body content fetched on-demand to save storage
               snippet: parsed.snippet,
               sentAt: parsed.sentAt,
               receivedAt: parsed.receivedAt,
@@ -1009,8 +1005,7 @@ export const loadMoreEmails = action({
               cc: parsed.cc,
               bcc: parsed.bcc,
               subject: parsed.subject,
-              bodyPlain: parsed.bodyPlain,
-              bodyHtml: parsed.bodyHtml,
+              // Body content fetched on-demand to save storage
               snippet: parsed.snippet,
               sentAt: parsed.sentAt,
               receivedAt: parsed.receivedAt,

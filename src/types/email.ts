@@ -42,6 +42,7 @@ export interface Message {
   subject: string;
   bodyPlain?: string;
   bodyHtml?: string;
+  bodyFetchedAt?: number; // When body content was last fetched from Gmail
   snippet: string;
   sentAt: number;
   attachments: Attachment[];
