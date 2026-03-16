@@ -1,3 +1,6 @@
+# Convex generated files
+convex/_generated
+
 # Logs
 logs
 *.log
