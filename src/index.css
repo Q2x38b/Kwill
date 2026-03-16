@@ -109,6 +109,7 @@
 
 html {
   scroll-behavior: smooth;
+  overscroll-behavior: none;
 }
 
 body {
@@ -121,6 +122,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-feature-settings: "ss01", "ss02", "cv01";
+  overscroll-behavior: none;
 }
 
 /* Fluid Functionalism base transitions */
