@@ -1,0 +1,220 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+
+/* Fluid Functionalism Design System */
+@theme {
+  /* Font family - Inter for clean, functional typography */
+  --font-sans: "Inter", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+
+  /* Fluid Functionalism Spring Tokens */
+  --duration-fast: 80ms;
+  --duration-moderate: 160ms;
+  --duration-slow: 240ms;
+  --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Radius - Rounded for softer appearance */
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 2rem;
+  --radius-pill: 9999px;
+}
+
+/* Light theme - Warm neutral palette like reference images */
+:root {
+  --background: #f5f4f0;
+  --foreground: #1a1a1a;
+  --card: #ffffff;
+  --card-foreground: #1a1a1a;
+  --popover: #ffffff;
+  --popover-foreground: #1a1a1a;
+  --primary: #1a1a1a;
+  --primary-foreground: #ffffff;
+  --secondary: #ebebeb;
+  --secondary-foreground: #1a1a1a;
+  --muted: #f0efeb;
+  --muted-foreground: #737373;
+  --accent: #f0efeb;
+  --accent-foreground: #1a1a1a;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --success: #16a34a;
+  --success-foreground: #ffffff;
+  --border: #e5e4e0;
+  --input: #e5e4e0;
+  --ring: #1a1a1a;
+  --shadow-color: rgba(0, 0, 0, 0.04);
+}
+
+/* Dark theme */
+.dark {
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --card: #141414;
+  --card-foreground: #fafafa;
+  --popover: #141414;
+  --popover-foreground: #fafafa;
+  --primary: #fafafa;
+  --primary-foreground: #0a0a0a;
+  --secondary: #262626;
+  --secondary-foreground: #fafafa;
+  --muted: #1a1a1a;
+  --muted-foreground: #a3a3a3;
+  --accent: #1a1a1a;
+  --accent-foreground: #fafafa;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --success: #22c55e;
+  --success-foreground: #000000;
+  --border: #262626;
+  --input: #262626;
+  --ring: #fafafa;
+  --shadow-color: rgba(0, 0, 0, 0.3);
+}
+
+/* System preference detection */
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --background: #0a0a0a;
+    --foreground: #fafafa;
+    --card: #141414;
+    --card-foreground: #fafafa;
+    --popover: #141414;
+    --popover-foreground: #fafafa;
+    --primary: #fafafa;
+    --primary-foreground: #0a0a0a;
+    --secondary: #262626;
+    --secondary-foreground: #fafafa;
+    --muted: #1a1a1a;
+    --muted-foreground: #a3a3a3;
+    --accent: #1a1a1a;
+    --accent-foreground: #fafafa;
+    --destructive: #ef4444;
+    --destructive-foreground: #ffffff;
+    --success: #22c55e;
+    --success-foreground: #000000;
+    --border: #262626;
+    --input: #262626;
+    --ring: #fafafa;
+    --shadow-color: rgba(0, 0, 0, 0.3);
+  }
+}
+
+/* Base styles */
+* {
+  border-color: var(--border);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "ss01", "ss02", "cv01";
+}
+
+/* Fluid Functionalism base transitions */
+button, a, input, textarea, select {
+  transition-property: background-color, border-color, color, opacity, transform, box-shadow;
+  transition-duration: var(--duration-fast);
+  transition-timing-function: var(--ease-spring);
+}
+
+/* Safe area for mobile */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.safe-area-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* Hide scrollbar but keep functionality */
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Custom scrollbar - minimal */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--muted-foreground);
+  border-radius: 3px;
+  opacity: 0.2;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  opacity: 0.4;
+}
+
+/* Hide scrollbar on mobile */
+@media (max-width: 768px) {
+  ::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Card shadow - subtle like reference */
+.card-shadow {
+  box-shadow:
+    0 1px 2px var(--shadow-color),
+    0 2px 4px var(--shadow-color),
+    0 4px 8px var(--shadow-color);
+}
+
+.card-shadow-lg {
+  box-shadow:
+    0 2px 4px var(--shadow-color),
+    0 4px 8px var(--shadow-color),
+    0 8px 16px var(--shadow-color),
+    0 16px 32px var(--shadow-color);
+}
+
+/* Email card hover effect - like reference images */
+.email-card {
+  background: var(--card);
+  border-radius: var(--radius-lg);
+  transition: all var(--duration-moderate) var(--ease-spring);
+}
+
+.email-card:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 2px 4px var(--shadow-color),
+    0 4px 8px var(--shadow-color),
+    0 8px 16px var(--shadow-color);
+}
+
+/* Focus styles - functional, not decorative */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Selection color */
+::selection {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
