@@ -12,15 +12,15 @@ interface NavItem {
 const navItems: NavItem[] = [
   { icon: Inbox, label: "Inbox", path: "/" },
   { icon: Search, label: "Search", path: "/search" },
-  { icon: PenSquare, label: "Compose", path: "/compose" },
   { icon: Settings, label: "Settings", path: "/settings" },
 ];
 
 interface BottomNavProps {
   unreadCount?: number;
+  onCompose: () => void;
 }
 
-export function BottomNav({ unreadCount = 0 }: BottomNavProps) {
+export function BottomNav({ unreadCount = 0, onCompose }: BottomNavProps) {
   const location = useLocation();
 
   return (
@@ -76,6 +76,22 @@ export function BottomNav({ unreadCount = 0 }: BottomNavProps) {
             </NavLink>
           );
         })}
+
+        {/* Compose button - not a NavLink */}
+        <button
+          onClick={onCompose}
+          className="flex flex-col items-center gap-1 p-2 relative"
+        >
+          <motion.div
+            whileTap={{ scale: 0.9 }}
+            className="relative p-2 rounded-xl transition-colors duration-200"
+          >
+            <PenSquare className="h-6 w-6 text-[var(--muted-foreground)]" />
+          </motion.div>
+          <span className="text-[10px] font-medium text-[var(--muted-foreground)]">
+            Compose
+          </span>
+        </button>
       </div>
     </nav>
   );
