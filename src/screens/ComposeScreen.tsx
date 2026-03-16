@@ -99,7 +99,7 @@ export function ComposeScreen() {
 
       <form
         onSubmit={handleSubmit(onSubmit)}
-        className="flex-1 flex flex-col overflow-hidden"
+        className="flex-1 flex flex-col overflow-hidden bg-[var(--card)]"
       >
         {/* Recipients */}
         <div className="border-b border-[var(--border)]">
@@ -108,7 +108,7 @@ export function ComposeScreen() {
             <Input
               {...register("to")}
               placeholder="Recipients"
-              className="border-0 focus-visible:ring-0 px-0"
+              className="border-0 focus-visible:ring-0 px-0 text-[var(--foreground)] bg-transparent"
             />
             <Button
               type="button"
@@ -142,7 +142,7 @@ export function ComposeScreen() {
                 <Input
                   {...register("cc")}
                   placeholder="Cc recipients"
-                  className="border-0 focus-visible:ring-0 px-0"
+                  className="border-0 focus-visible:ring-0 px-0 text-[var(--foreground)] bg-transparent"
                 />
               </div>
               <div className="flex items-center px-4 py-3 gap-2 border-t border-[var(--border)]">
@@ -150,7 +150,7 @@ export function ComposeScreen() {
                 <Input
                   {...register("bcc")}
                   placeholder="Bcc recipients"
-                  className="border-0 focus-visible:ring-0 px-0"
+                  className="border-0 focus-visible:ring-0 px-0 text-[var(--foreground)] bg-transparent"
                 />
               </div>
             </motion.div>
@@ -162,7 +162,7 @@ export function ComposeScreen() {
           <Input
             {...register("subject")}
             placeholder="Subject"
-            className="border-0 focus-visible:ring-0 px-0 text-base font-medium"
+            className="border-0 focus-visible:ring-0 px-0 text-base font-medium text-[var(--foreground)] bg-transparent"
           />
         </div>
         {errors.subject && (
@@ -176,7 +176,7 @@ export function ComposeScreen() {
           <Textarea
             {...register("body")}
             placeholder="Write your message..."
-            className="border-0 focus-visible:ring-0 min-h-full resize-none p-0"
+            className="border-0 focus-visible:ring-0 min-h-full resize-none p-0 text-[var(--foreground)] bg-transparent"
           />
         </div>
 

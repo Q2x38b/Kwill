@@ -3,7 +3,7 @@ import { motion } from "framer-motion";
 import { FileText, Image, Download, Eye, Paperclip } from "lucide-react";
 import DOMPurify from "dompurify";
 import type { Message, Attachment } from "@/types/email";
-import { cn, formatRelativeTime } from "@/lib/utils";
+import { cn, formatRelativeTime, getInitials, generateAvatarColor } from "@/lib/utils";
 
 interface EmailMessageProps {
   message: Message;
@@ -41,19 +41,33 @@ export function EmailMessage({ message }: EmailMessageProps) {
     return sanitizeHtml(message.bodyHtml);
   }, [message.bodyHtml]);
 
+  const avatarColor = generateAvatarColor(senderEmail);
+  const initials = getInitials(message.from.name, senderEmail);
+
   return (
     <div className="email-card p-6">
       {/* Header */}
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-medium">{senderName}</span>
-          {senderName !== senderEmail && (
-            <span className="text-[var(--muted-foreground)] text-sm">
-              &lt;{senderEmail}&gt;
-            </span>
-          )}
+      <div className="flex items-start gap-3 mb-4">
+        {/* Avatar */}
+        <div
+          className="w-10 h-10 rounded-full flex items-center justify-center text-white font-medium text-sm shrink-0"
+          style={{ backgroundColor: avatarColor }}
+        >
+          {initials}
+        </div>
+
+        {/* Sender info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-medium">{senderName}</span>
+            {senderName !== senderEmail && (
+              <span className="text-[var(--muted-foreground)] text-sm truncate">
+                &lt;{senderEmail}&gt;
+              </span>
+            )}
+          </div>
           <span className="text-[var(--muted-foreground)] text-sm">
-            · {formatRelativeTime(message.sentAt)}
+            {formatRelativeTime(message.sentAt)}
           </span>
         </div>
       </div>
