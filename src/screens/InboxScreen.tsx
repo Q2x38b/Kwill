@@ -104,10 +104,10 @@ export function InboxScreen() {
   };
 
   // Sync function that handles errors
-  const doSync = useCallback(async (isBackground = false) => {
-    // Debounce - don't sync more than once per 30 seconds
+  const doSync = useCallback(async (isBackground = false, forceSync = false) => {
+    // Debounce - don't sync more than once per 30 seconds (unless forced)
     const now = Date.now();
-    if (now - lastSyncRef.current < 30000) {
+    if (!forceSync && now - lastSyncRef.current < 30000) {
       return;
     }
     lastSyncRef.current = now;
@@ -144,7 +144,7 @@ export function InboxScreen() {
     }
   }, [currentUser?.gmailConnected, smartSync, fullSync]);
 
-  // Auto-sync on app focus/visibility change
+  // Auto-sync on app focus/visibility change and online status
   useEffect(() => {
     if (!currentUser?.gmailConnected) return;
 
@@ -158,8 +158,15 @@ export function InboxScreen() {
       doSync(true); // Background sync on window focus
     };
 
+    // Handle coming back online - force sync to catch up on missed emails
+    const handleOnline = () => {
+      console.log("Network online - syncing emails...");
+      doSync(true, true); // Force sync, bypass debounce
+    };
+
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("focus", handleFocus);
+    window.addEventListener("online", handleOnline);
 
     // Initial sync when component mounts
     doSync(true);
@@ -167,6 +174,7 @@ export function InboxScreen() {
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("online", handleOnline);
     };
   }, [currentUser?.gmailConnected, doSync]);
 
