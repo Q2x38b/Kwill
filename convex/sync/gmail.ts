@@ -693,6 +693,16 @@ export const fullSyncInternal = internalAction({
         connected: true,
       });
 
+      // Set up Gmail push notifications for real-time updates
+      try {
+        await ctx.runAction(internal.sync.gmail.setupGmailWatch, {
+          clerkUserId: args.clerkUserId,
+        });
+      } catch (watchError) {
+        // Non-fatal - push notifications are optional
+        console.log("Failed to set up Gmail watch (non-fatal):", watchError);
+      }
+
       return { success: true, threadsSynced: syncedCount };
     } catch (err) {
       await ctx.runMutation(internal.sync.mutations.updateSyncState, {
@@ -1024,6 +1034,198 @@ export const loadMoreEmails = action({
       console.error("Failed to load more emails:", err);
       throw err;
     }
+  },
+});
+
+/**
+ * Set up Gmail push notifications (watch)
+ * This registers for real-time notifications when emails change
+ */
+export const setupGmailWatch = internalAction({
+  args: { clerkUserId: v.string() },
+  handler: async (ctx, args): Promise<{ success: boolean; expiration?: number; error?: string }> => {
+    const topicName = process.env.GMAIL_PUBSUB_TOPIC;
+
+    if (!topicName) {
+      console.log("GMAIL_PUBSUB_TOPIC not configured, skipping watch setup");
+      return { success: false, error: "Push notifications not configured" };
+    }
+
+    const user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
+      clerkId: args.clerkUserId,
+    });
+
+    if (!user) {
+      return { success: false, error: "User not found" };
+    }
+
+    try {
+      const accessToken = await getGoogleOAuthToken(args.clerkUserId);
+
+      // Call Gmail watch API
+      const watchResponse = await gmailFetch<{
+        historyId: string;
+        expiration: string;
+      }>(
+        "/watch",
+        accessToken,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            topicName,
+            labelIds: ["INBOX"],
+            labelFilterBehavior: "INCLUDE",
+          }),
+        }
+      );
+
+      const expiration = parseInt(watchResponse.expiration, 10);
+
+      // Store watch state
+      await ctx.runMutation(internal.sync.mutations.updateWatchState, {
+        userId: user._id,
+        watchExpiration: expiration,
+      });
+
+      // Also update historyId if we got one
+      if (watchResponse.historyId) {
+        await ctx.runMutation(internal.sync.mutations.updateSyncState, {
+          userId: user._id,
+          historyId: watchResponse.historyId,
+          syncInProgress: false,
+        });
+      }
+
+      console.log(`Gmail watch set up for ${user.email}, expires: ${new Date(expiration).toISOString()}`);
+
+      return { success: true, expiration };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      console.error(`Failed to set up Gmail watch for ${user.email}:`, errorMsg);
+      return { success: false, error: errorMsg };
+    }
+  },
+});
+
+/**
+ * Stop Gmail push notifications (watch)
+ */
+export const stopGmailWatch = internalAction({
+  args: { clerkUserId: v.string() },
+  handler: async (ctx, args): Promise<{ success: boolean }> => {
+    const user = await ctx.runQuery(internal.sync.queries.getUserByClerkId, {
+      clerkId: args.clerkUserId,
+    });
+
+    if (!user) {
+      return { success: false };
+    }
+
+    try {
+      const accessToken = await getGoogleOAuthToken(args.clerkUserId);
+
+      await gmailFetch<void>("/stop", accessToken, { method: "POST" });
+
+      // Clear watch state
+      await ctx.runMutation(internal.sync.mutations.updateWatchState, {
+        userId: user._id,
+        watchExpiration: undefined,
+        watchResourceId: undefined,
+      });
+
+      console.log(`Gmail watch stopped for ${user.email}`);
+
+      return { success: true };
+    } catch (error) {
+      console.error("Failed to stop Gmail watch:", error);
+      return { success: false };
+    }
+  },
+});
+
+/**
+ * Sync triggered by email address (from push notification webhook)
+ */
+export const syncByEmail = internalAction({
+  args: {
+    email: v.string(),
+    triggeredByPush: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args): Promise<{ success?: boolean; error?: string }> => {
+    // Find user by email
+    const user = await ctx.runQuery(internal.sync.queries.getUserByEmail, {
+      email: args.email,
+    });
+
+    if (!user) {
+      console.log(`No user found for email: ${args.email}`);
+      return { success: false, error: "User not found" };
+    }
+
+    if (!user.gmailConnected) {
+      console.log(`Gmail not connected for user: ${args.email}`);
+      return { success: false, error: "Gmail not connected" };
+    }
+
+    console.log(`Push notification sync for ${args.email}`);
+
+    // Run incremental sync
+    try {
+      const result = await ctx.runAction(internal.sync.gmail.incrementalSyncInternal, {
+        clerkUserId: user.clerkId,
+      });
+
+      // If incremental sync says full sync needed, do it
+      if (result.needsFullSync) {
+        await ctx.runAction(internal.sync.gmail.fullSyncInternal, {
+          clerkUserId: user.clerkId,
+        });
+      }
+
+      return { success: true };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "Unknown error";
+      console.error(`Push sync failed for ${args.email}:`, errorMsg);
+      return { success: false, error: errorMsg };
+    }
+  },
+});
+
+/**
+ * Renew Gmail watch for all users with expiring watches
+ */
+export const renewExpiringWatches = internalAction({
+  args: {},
+  handler: async (ctx): Promise<{ renewed: number; errors: string[] }> => {
+    const users = await ctx.runQuery(internal.sync.queries.getUsersWithExpiringWatch, {});
+
+    let renewedCount = 0;
+    const errors: string[] = [];
+
+    for (const user of users) {
+      if (!user) continue;
+
+      try {
+        const result = await ctx.runAction(internal.sync.gmail.setupGmailWatch, {
+          clerkUserId: user.clerkId,
+        });
+
+        if (result.success) {
+          renewedCount++;
+        } else if (result.error) {
+          errors.push(`${user.email}: ${result.error}`);
+        }
+      } catch (error) {
+        const errorMsg = error instanceof Error ? error.message : "Unknown error";
+        errors.push(`${user.email}: ${errorMsg}`);
+      }
+    }
+
+    if (renewedCount > 0 || errors.length > 0) {
+      console.log(`Watch renewal: ${renewedCount} renewed, ${errors.length} errors`);
+    }
+
+    return { renewed: renewedCount, errors };
   },
 });
 

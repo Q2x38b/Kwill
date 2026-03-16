@@ -83,3 +83,49 @@ export const getThreadByGmailId = internalQuery({
       .first();
   },
 });
+
+/**
+ * Get user by email address (for Gmail push notifications)
+ */
+export const getUserByEmail = internalQuery({
+  args: {
+    email: v.string(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("users")
+      .withIndex("by_email", (q) => q.eq("email", args.email))
+      .first();
+  },
+});
+
+/**
+ * Get users with expiring Gmail watch (for renewal)
+ * Returns users whose watch expires within the next hour
+ */
+export const getUsersWithExpiringWatch = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const oneHourFromNow = Date.now() + 60 * 60 * 1000;
+
+    // Get all sync states
+    const syncStates = await ctx.db.query("syncState").collect();
+
+    // Filter to those with watch expiring soon
+    const expiringUserIds = syncStates
+      .filter((state) => {
+        return (
+          state.watchExpiration &&
+          state.watchExpiration < oneHourFromNow
+        );
+      })
+      .map((state) => state.userId);
+
+    // Get the corresponding users
+    const users = await Promise.all(
+      expiringUserIds.map((userId) => ctx.db.get(userId))
+    );
+
+    return users.filter((user) => user !== null && user.gmailConnected);
+  },
+});

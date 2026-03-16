@@ -241,3 +241,35 @@ export const updateSyncState = internalMutation({
     }
   },
 });
+
+/**
+ * Update Gmail watch state (for push notifications)
+ */
+export const updateWatchState = internalMutation({
+  args: {
+    userId: v.id("users"),
+    watchExpiration: v.optional(v.number()),
+    watchResourceId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("syncState")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .first();
+
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        watchExpiration: args.watchExpiration,
+        watchResourceId: args.watchResourceId,
+      });
+    } else {
+      // Create sync state if it doesn't exist
+      await ctx.db.insert("syncState", {
+        userId: args.userId,
+        syncInProgress: false,
+        watchExpiration: args.watchExpiration,
+        watchResourceId: args.watchResourceId,
+      });
+    }
+  },
+});

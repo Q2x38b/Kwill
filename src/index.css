@@ -218,3 +218,43 @@ button, a, input, textarea, select {
   background: var(--primary);
   color: var(--primary-foreground);
 }
+
+/* Email HTML content - Force readable colors for external emails */
+.email-html-content {
+  /* Override inline styles that set dark colors */
+  color: #1a1a1a !important;
+  background: #ffffff !important;
+}
+
+/* Force all text inside email HTML to be dark/readable */
+.email-html-content * {
+  color: inherit;
+}
+
+/* Allow links to retain their styling */
+.email-html-content a {
+  color: #2563eb !important;
+}
+
+.email-html-content a:hover {
+  text-decoration: underline;
+}
+
+/* Force tables and divs with inline dark backgrounds to be light */
+.email-html-content table,
+.email-html-content td,
+.email-html-content th,
+.email-html-content div[style*="background"] {
+  background-color: transparent !important;
+}
+
+/* Handle images - ensure they're visible */
+.email-html-content img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Handle horizontal rules */
+.email-html-content hr {
+  border-color: #e5e5e5;
+}

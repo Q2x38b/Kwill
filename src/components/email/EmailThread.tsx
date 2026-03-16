@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "convex/react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -26,11 +27,31 @@ interface EmailThreadProps {
 }
 
 export function EmailThread({ threadId, thread }: EmailThreadProps) {
+  const navigate = useNavigate();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showComposer, setShowComposer] = useState(false);
+  // Force re-render every minute to update relative timestamps
+  const [, setTick] = useState(0);
 
   const messages = (useQuery(api.emails.queries.getMessages, { threadId }) ?? []) as Message[];
-  const { archive, moveToTrash, toggleStar } = useEmailActions();
+  const { archive, moveToTrash, toggleStar, markAsRead } = useEmailActions();
+
+  // Mark thread as read when viewed
+  useEffect(() => {
+    if (thread.isUnread) {
+      markAsRead(threadId);
+    }
+  }, [threadId, thread.isUnread, markAsRead]);
+
+  const handleArchive = async () => {
+    await archive(threadId);
+    navigate("/");
+  };
+
+  const handleDelete = async () => {
+    await moveToTrash(threadId);
+    navigate("/");
+  };
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -41,6 +62,14 @@ export function EmailThread({ threadId, thread }: EmailThreadProps) {
       });
     }
   }, [messages.length]);
+
+  // Timer to refresh relative timestamps every minute
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   const latestMessage = messages[messages.length - 1];
 
@@ -76,12 +105,12 @@ export function EmailThread({ threadId, thread }: EmailThreadProps) {
             <ActionButton
               icon={Archive}
               label="Archive"
-              onClick={() => archive(threadId)}
+              onClick={handleArchive}
             />
             <ActionButton
               icon={Trash2}
               label="Delete"
-              onClick={() => moveToTrash(threadId)}
+              onClick={handleDelete}
             />
             <ActionButton
               icon={Star}

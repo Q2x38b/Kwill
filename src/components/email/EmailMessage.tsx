@@ -77,9 +77,15 @@ export function EmailMessage({ message }: EmailMessageProps) {
         )}
       >
         {sanitizedHtml ? (
+          // Wrap HTML emails in a light-mode container since external emails
+          // typically have dark text with inline styles that don't adapt to dark mode
           <div
             dangerouslySetInnerHTML={{ __html: sanitizedHtml }}
-            className="break-words"
+            className="break-words email-html-content bg-white text-gray-900 rounded-lg p-4 -mx-4"
+            style={{
+              // Force readable colors for injected HTML with inline styles
+              colorScheme: "light",
+            }}
           />
         ) : (
           <div className="whitespace-pre-wrap break-words">

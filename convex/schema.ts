@@ -180,5 +180,8 @@ export default defineSchema({
     lastIncrementalSyncAt: v.optional(v.number()),
     syncInProgress: v.boolean(),
     syncError: v.optional(v.string()),
+    // Gmail Push Notifications (watch) state
+    watchExpiration: v.optional(v.number()), // Unix timestamp when watch expires
+    watchResourceId: v.optional(v.string()), // Resource ID from Gmail watch
   }).index("by_user", ["userId"]),
 });

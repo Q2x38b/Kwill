@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useAction } from "convex/react";
 import { motion } from "framer-motion";
@@ -17,15 +17,31 @@ export function InboxScreen() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [cursor, setCursor] = useState<number | undefined>(undefined);
-  const [allThreads, setAllThreads] = useState<Thread[]>([]);
+  const [paginatedThreads, setPaginatedThreads] = useState<Thread[]>([]);
   const lastSyncRef = useRef<number>(0);
+  // Force re-render every minute to update relative timestamps
+  const [, setTick] = useState(0);
 
-  const result = useQuery(api.emails.queries.listThreads, {
+  // Query for first page - this updates in real-time from Convex
+  const firstPageResult = useQuery(api.emails.queries.listThreads, {
     category: filters.category,
     isStarred: filters.isStarred,
     isUnread: filters.isUnread,
-    cursor,
+    cursor: undefined, // Always fetch first page for real-time updates
   });
+
+  // Query for current paginated page (if any)
+  const paginatedResult = useQuery(
+    api.emails.queries.listThreads,
+    cursor !== undefined
+      ? {
+          category: filters.category,
+          isStarred: filters.isStarred,
+          isUnread: filters.isUnread,
+          cursor,
+        }
+      : "skip"
+  );
 
   // Use smartSync which tries incremental first, falls back to full
   const smartSync = useAction(api.sync.gmail.smartSync);
@@ -33,33 +49,51 @@ export function InboxScreen() {
   const loadMoreAction = useAction(api.sync.gmail.loadMoreEmails);
   const currentUser = useQuery(api.users.current);
 
-  const threads = result?.threads ?? [];
-  const hasMore = result?.hasMore ?? false;
-  const nextCursor = result?.nextCursor;
-  const isLoading = result === undefined && allThreads.length === 0;
+  const firstPageThreads = firstPageResult?.threads ?? [];
+  const hasMore = firstPageResult?.hasMore ?? false;
+  const nextCursor = firstPageResult?.nextCursor;
 
-  // Accumulate threads as we paginate
-  useEffect(() => {
-    if (threads.length > 0) {
-      if (cursor === undefined) {
-        // First page - replace all
-        setAllThreads(threads);
-      } else {
-        // Additional page - append new threads
-        setAllThreads((prev: Thread[]) => {
-          const existingIds = new Set(prev.map((t: Thread) => t._id));
-          const newThreads = threads.filter((t: Thread) => !existingIds.has(t._id));
-          return [...prev, ...newThreads];
-        });
-      }
+  // Merge first page (real-time) with paginated threads
+  const allThreads = useMemo(() => {
+    if (paginatedThreads.length === 0) {
+      return firstPageThreads;
     }
-  }, [threads, cursor]);
+    // Merge: use first page threads + additional paginated threads
+    const firstPageIds = new Set(firstPageThreads.map((t) => t._id));
+    const additionalThreads = paginatedThreads.filter((t) => !firstPageIds.has(t._id));
+    // Sort by lastMessageAt descending
+    return [...firstPageThreads, ...additionalThreads].sort(
+      (a, b) => b.lastMessageAt - a.lastMessageAt
+    );
+  }, [firstPageThreads, paginatedThreads]);
+
+  const isLoading = firstPageResult === undefined && allThreads.length === 0;
+
+  // When paginated query returns, accumulate those threads
+  useEffect(() => {
+    if (paginatedResult?.threads && paginatedResult.threads.length > 0) {
+      setPaginatedThreads((prev) => {
+        const existingIds = new Set(prev.map((t) => t._id));
+        const newThreads = paginatedResult.threads.filter((t) => !existingIds.has(t._id));
+        if (newThreads.length === 0) return prev;
+        return [...prev, ...newThreads];
+      });
+    }
+  }, [paginatedResult?.threads]);
 
   // Reset pagination when filters change
   useEffect(() => {
     setCursor(undefined);
-    setAllThreads([]);
+    setPaginatedThreads([]);
   }, [filters.category, filters.isStarred, filters.isUnread]);
+
+  // Timer to refresh relative timestamps every minute
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleCategoryChange = (category?: EmailCategory) => {
     setFilters((prev) => ({ ...prev, category }));
