@@ -124,8 +124,7 @@ export function InboxScreen() {
     try {
       // Use smartSync for incremental updates, fullSync for initial sync
       const syncFn = currentUser?.gmailConnected ? smartSync : fullSync;
-      const result = await syncFn({});
-      console.log("Gmail sync result:", result);
+      await syncFn({});
     } catch (error) {
       console.error("Failed to sync Gmail:", error);
       if (!isBackground) {

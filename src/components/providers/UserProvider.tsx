@@ -23,10 +23,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
         .then(() => {
           // Auto-setup Gmail if user signed in with Google
           // This runs in the background and doesn't block the UI
-          autoSetup({}).catch((err) => {
-            // Non-fatal - user can still manually set up in settings
-            console.log("Auto-setup skipped or failed:", err);
-          });
+          // Errors are non-fatal - user can manually set up in settings
+          autoSetup({}).catch(() => {});
         })
         .catch((err) => {
           console.error("Failed to sync user to Convex:", err);

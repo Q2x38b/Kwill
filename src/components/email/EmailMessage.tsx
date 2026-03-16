@@ -10,6 +10,32 @@ interface EmailMessageProps {
 }
 
 // Configure DOMPurify for email HTML
+// Block tracking pixels and upgrade HTTP to HTTPS
+DOMPurify.addHook("uponSanitizeAttribute", (node, data) => {
+  if (data.attrName === "src" && node.tagName === "IMG") {
+    const src = data.attrValue;
+    // Block tracking pixels (1x1 images, common tracking domains)
+    if (
+      src.includes("track") ||
+      src.includes("pixel") ||
+      src.includes("beacon") ||
+      src.includes("open.gif") ||
+      src.includes("o.gif") ||
+      src.includes("/imp?") ||
+      src.includes("/e_id") ||
+      src.includes("UCMController") ||
+      src.match(/\.(gif|png)\?.*[&?](mi_|e_id|adcampaign|dtm_)/)
+    ) {
+      data.attrValue = "";
+      return;
+    }
+    // Upgrade HTTP to HTTPS to avoid mixed content warnings
+    if (src.startsWith("http://")) {
+      data.attrValue = src.replace("http://", "https://");
+    }
+  }
+});
+
 const sanitizeHtml = (html: string): string => {
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
